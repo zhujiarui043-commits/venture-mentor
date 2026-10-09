@@ -1,0 +1,146 @@
+import assert from "node:assert/strict";
+import {mkdtemp, readFile, writeFile, rm, mkdir} from "node:fs/promises";
+import {tmpdir} from "node:os";
+import {join, isAbsolute} from "node:path";
+import {createRequire} from "node:module";
+import {fileURLToPath, pathToFileURL} from "node:url";
+import {createElement} from "react";
+import {renderToStaticMarkup} from "react-dom/server";
+import ts from "typescript";
+
+const root = fileURLToPath(new URL("../", import.meta.url));
+const require = createRequire(import.meta.url);
+const temp = await mkdtemp(join(tmpdir(), "mentor-panel-"));
+let preview, browser, uiDir;
+try {
+  for (const [name, path] of Object.entries({"mentor-workspace":"components/mentor-workspace.tsx", "theme-toggle":"components/theme-toggle.tsx", types:"lib/types.ts"})) {
+    let code = ts.transpileModule(await readFile(join(root, path), "utf8"), {compilerOptions:{module:ts.ModuleKind.ESNext, target:ts.ScriptTarget.ES2022, jsx:ts.JsxEmit.ReactJSX}}).outputText.replaceAll('from "./theme-toggle"','from "./theme-toggle.mjs"');
+    for (const dependency of ["react/jsx-runtime", "react", "lucide-react", "next-themes"]) code = code.replaceAll(`from "${dependency}"`, `from ${JSON.stringify(pathToFileURL(require.resolve(dependency)).href)}`);
+    await writeFile(join(temp, `${name}.mjs`), code);
+  }
+  const {mentorPanelBounds, MentorWorkspace} = await import(pathToFileURL(join(temp, "mentor-workspace.mjs")));
+  const {emptyProject} = await import(pathToFileURL(join(temp, "types.mjs")));
+  assert.deepEqual(mentorPanelBounds(1200), {min:300,max:760});
+  assert.deepEqual(mentorPanelBounds(820), {min:300,max:500});
+  assert.deepEqual(mentorPanelBounds(550), {min:300,max:300});
+  assert.deepEqual(mentorPanelBounds(0), {min:300,max:760});
+  const props = {open:true,fullscreen:false,onFullscreenChange:()=>{},onClose:()=>{},chat:createElement("div", {className:"conversation"}, "聊天历史"),children:createElement("main", {className:"main-panel"}, "项目工作区")};
+  const normal = renderToStaticMarkup(createElement(MentorWorkspace, props));
+  assert.ok(normal.includes('role="separator"') && normal.includes('aria-valuenow="370"') && normal.includes("全屏显示导师对话"));
+  const full = renderToStaticMarkup(createElement(MentorWorkspace, {...props, fullscreen:true}));
+  assert.ok(full.includes('role="dialog"') && full.includes('aria-modal="true"') && full.includes("退出导师全屏"));
+  assert.ok(!full.includes('role="separator"') && full.includes("聊天历史"));
+  const closed = renderToStaticMarkup(createElement(MentorWorkspace, {...props, open:false}));
+  assert.ok(!closed.includes("<aside") && closed.includes("项目工作区"));
+  console.log("导师面板检查通过：宽度边界、拖拽控件、全屏/退出按钮、关闭状态及可访问性。");
+
+  if (process.argv.includes("--browser")) {
+    const {createServer} = await import("vite");
+    const {default:react} = await import("@vitejs/plugin-react");
+    const {chromium} = await import(process.env.PLAYWRIGHT_MODULE_PATH ? pathToFileURL(process.env.PLAYWRIGHT_MODULE_PATH).href : "playwright");
+    uiDir = await mkdtemp(join(root, ".ui-panel-check-"));
+    await writeFile(join(uiDir, "index.html"), '<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head><body><div id="root"></div><script type="module" src="/main.tsx"></script></body></html>');
+    await writeFile(join(uiDir, "main.tsx"), "import React from 'react';import {createRoot} from 'react-dom/client';import Studio from '@/app/studio';import {ThemeProvider} from '@/components/theme-provider';import '@/app/globals.css';createRoot(document.getElementById('root')!).render(<ThemeProvider><Studio/></ThemeProvider>);");
+    preview = await createServer({configFile:false,root:uiDir,plugins:[react()],resolve:{alias:{"@":root}},server:{host:"127.0.0.1",port:0,fs:{allow:[root]}}});
+    await preview.listen();
+    browser = await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? {executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH} : {})});
+    const page = await browser.newPage({viewport:{width:1440,height:1000},colorScheme:"dark"});
+    const errors=[];page.on("pageerror", error => errors.push(error.message));
+    const state = {...emptyProject("test-panel"),title:"穿搭助手",fields:{solution:"帮助大学生安排每日穿搭"},messages:[{role:"user",content:"准备探索校园穿搭场景",at:"2026-10-09T02:00:00Z"},{role:"assistant",content:"可以先访谈最近有实际经历的同学。",at:"2026-10-09T02:01:00Z"}]};
+    await page.route("**/api/project", route => route.fulfill({json:{state,revision:1}}));
+    let agentRequests=0;await page.route("**/api/agent", route => {agentRequests++;return route.fulfill({json:{state,revision:1}});});
+    await page.goto(`http://127.0.0.1:${preview.httpServer.address().port}/`);
+    const panel = page.locator("#mentor-panel"), handle = page.locator(".mentor-resize-handle"), draft = page.getByPlaceholder("描述想法、提出问题或说明要分析什么…");
+    await page.getByRole("heading", {name:"穿搭助手",exact:true}).waitFor();
+    const panelWidth = () => panel.evaluate(element => element.getBoundingClientRect().width);
+    const approx = (a,b) => assert.ok(Math.abs(a-b)<2, `${a} vs ${b}`);
+    const pollWidth = value => page.waitForFunction(width => Math.abs(document.querySelector("#mentor-panel").getBoundingClientRect().width-width)<2, value);
+    await pollWidth(370);
+    await page.getByRole("button",{name:"切换到浅色模式"}).waitFor();
+    assert.ok(await page.locator("html").evaluate(element => element.classList.contains("dark")));
+    assert.equal(await page.locator(".field-card").first().evaluate(element => getComputedStyle(element).backgroundColor), "rgb(23, 42, 52)");
+    assert.equal(await page.locator(".mentor-panel").evaluate(element => getComputedStyle(element).backgroundColor), "rgb(23, 42, 52)");
+    const screenshots = join(root,".qa-results","mentor-panel");await mkdir(screenshots,{recursive:true});
+    await page.screenshot({path:join(screenshots,"dark.png"),fullPage:true});
+    await page.getByRole("button",{name:"切换到浅色模式"}).click();
+    assert.equal(await page.evaluate(() => localStorage.getItem("venture-mentor-theme")),"light");
+    await page.reload();
+    await page.getByRole("heading",{name:"穿搭助手",exact:true}).waitFor();
+    assert.ok(await page.locator("html").evaluate(element => element.classList.contains("light")));
+    await page.getByRole("button",{name:"切换到深色模式"}).click();
+    await page.reload();
+    await page.getByRole("button",{name:"切换到浅色模式"}).waitFor();
+    await page.getByRole("button",{name:"切换到浅色模式"}).click();
+    await draft.fill("这里是尚未发送的访谈问题，请保留。");
+    await page.locator('input[type="file"]').setInputFiles({name:"测试材料.txt",mimeType:"text/plain",buffer:Buffer.from("真实访谈材料：请不要在切换时丢失。")});
+    await page.getByText("测试材料.txt ·",{exact:false}).waitFor();
+    await page.mouse.move(300,20);
+    assert.equal(await page.locator(".mentor-resize-grip").evaluate(element => getComputedStyle(element).opacity), "0");
+    const initial = await handle.boundingBox();
+    await page.mouse.move(initial.x+initial.width/2, initial.y+initial.height/2);
+    await page.waitForFunction(() => getComputedStyle(document.querySelector(".mentor-resize-grip")).opacity === "1");
+    await page.mouse.down();await page.mouse.move(initial.x+initial.width/2-160,initial.y+initial.height/2,{steps:8});await page.mouse.up();
+    await pollWidth(530);
+    assert.ok(!await page.locator(".chat-resizing").count());
+    // Pointer capture keeps resizing when the mouse leaves the visible divider.
+    const wide = await handle.boundingBox();
+    await page.mouse.move(wide.x+8,wide.y+120);await page.mouse.down();await page.mouse.move(1,wide.y+120,{steps:5});await page.mouse.up();
+    await pollWidth(760);
+    assert.ok(await page.locator(".main-panel").evaluate(element => element.getBoundingClientRect().width)>=320);
+    const widest = await handle.boundingBox();
+    await page.mouse.move(widest.x+8,widest.y+120);await page.mouse.down();await page.mouse.move(1439,widest.y+120,{steps:5});await page.mouse.up();
+    await pollWidth(300);
+    await handle.focus();await page.keyboard.press("ArrowLeft");await pollWidth(320);await page.keyboard.press("End");await pollWidth(760);await page.keyboard.press("Home");await pollWidth(300);
+    for(let i=0;i<8;i++) await page.keyboard.press("ArrowLeft");
+    await pollWidth(460);const savedWidth = await panelWidth();
+    await page.screenshot({path:join(screenshots,"resized.png"),fullPage:true});
+
+    await page.getByRole("button",{name:"全屏显示导师对话"}).click();
+    await page.getByRole("dialog").waitFor();
+    const fullBounds = await panel.boundingBox();approx(fullBounds.x,0);approx(fullBounds.y,0);approx(fullBounds.width,1440);approx(fullBounds.height,1000);
+    assert.equal(await page.locator(".main-panel").isVisible(),false);
+    assert.equal(await handle.count(),0);
+    assert.equal(await draft.inputValue(),"这里是尚未发送的访谈问题，请保留。");
+    assert.ok(await page.getByText("测试材料.txt ·",{exact:false}).isVisible());
+    assert.ok(await page.getByText("可以先访谈最近有实际经历的同学。",{exact:true}).isVisible());
+    await page.getByRole("checkbox",{name:"自动联网（按需）"}).focus();await page.keyboard.press("Tab");
+    assert.equal(await page.evaluate(() => document.activeElement.getAttribute("aria-label")),"切换到深色模式");
+    await page.keyboard.press("Shift+Tab");assert.equal(await page.evaluate(() => document.activeElement.type),"checkbox");
+    await page.screenshot({path:join(screenshots,"fullscreen.png"),fullPage:true});
+    await panel.getByRole("button",{name:"切换到深色模式"}).click();
+    assert.equal(await page.locator(".mentor-panel-fullscreen").evaluate(element => getComputedStyle(element).backgroundColor), "rgb(23, 42, 52)");
+    await page.screenshot({path:join(screenshots,"dark-fullscreen.png"),fullPage:true});
+    await panel.getByRole("button",{name:"切换到浅色模式"}).click();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button",{name:"全屏显示导师对话"}).waitFor();await pollWidth(savedWidth);
+    assert.ok(await page.locator(".main-panel").isVisible());
+    await page.getByRole("button",{name:"全屏显示导师对话"}).click();await page.getByRole("button",{name:"退出导师全屏"}).click();await pollWidth(savedWidth);
+    await page.getByRole("button",{name:"显示或收起导师"}).click();assert.equal(await panel.count(),0);
+    await page.getByRole("button",{name:"显示或收起导师"}).click();await pollWidth(savedWidth);
+    assert.equal(await draft.inputValue(),"这里是尚未发送的访谈问题，请保留。");
+
+    await page.setViewportSize({width:900,height:900});
+    const available = await page.locator(".body-grid").evaluate(element => element.clientWidth);
+    await pollWidth(Math.min(savedWidth,mentorPanelBounds(available).max));
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth<=innerWidth+1));
+    await page.setViewportSize({width:390,height:844});
+    await page.waitForFunction(() => getComputedStyle(document.querySelector(".mentor-resize-handle")).display === "none");
+    approx(await panelWidth(),390);
+    await page.getByRole("button",{name:"全屏显示导师对话"}).click();
+    const mobile = await panel.boundingBox();approx(mobile.x,0);approx(mobile.y,0);approx(mobile.width,390);approx(mobile.height,844);
+    assert.ok(await draft.isVisible());
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth<=innerWidth+1));
+    await page.screenshot({path:join(screenshots,"mobile-fullscreen.png"),fullPage:true});
+    await page.getByRole("button",{name:"收起导师",exact:true}).click();assert.equal(await panel.count(),0);
+    await page.getByRole("button",{name:"显示或收起导师"}).click();
+    assert.equal(await page.getByRole("dialog").count(),0);
+    assert.equal(await draft.inputValue(),"这里是尚未发送的访谈问题，请保留。");
+    assert.equal(agentRequests,0);assert.deepEqual(errors,[]);
+    console.log("导师面板浏览器验收通过：悬停拖动、宽度上下限、键盘调宽、全屏/Esc/按钮退出、焦点循环、草稿/材料/历史保留、手机及关闭重开。");
+  }
+} finally {
+  if(browser) await browser.close();
+  if(preview) await preview.close();
+  if(uiDir) {assert.ok(isAbsolute(uiDir)&&uiDir.startsWith(join(root,".ui-panel-check-")));await rm(uiDir,{recursive:true,force:true});}
+  assert.ok(isAbsolute(temp)&&temp.startsWith(join(tmpdir(),"mentor-panel-")));await rm(temp,{recursive:true,force:true});
+}

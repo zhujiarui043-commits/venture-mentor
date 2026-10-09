@@ -1,0 +1,6 @@
+# Copy to .dev.vars for local development and fill in your own secrets.
+# Production uses Cloudflare Worker secrets instead of this file.
+TAVILY_API_KEY=""
+DEEPSEEK_API_KEY=""
+SESSION_SECRET=""
+TEST_ACCESS_CODES='{"owner":"replace-with-your-own-random-code-of-at-least-16-characters"}'
