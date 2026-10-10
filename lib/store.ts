@@ -1,20 +1,26 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { projects } from "@/db/schema";
-import { emptyProject, type ProjectState } from "./types";
+import { emptyProject, numberAnalysisRecords, type ProjectState } from "./types";
+
+function readState(json: string): ProjectState {
+  const state = JSON.parse(json) as ProjectState;
+  return {...state, artifacts: numberAnalysisRecords(state.artifacts)};
+}
 
 export async function getProject(id: string) {
   const [row] = await getDb().select().from(projects).where(eq(projects.id, id)).limit(1);
-  return row ? { state: JSON.parse(row.state) as ProjectState, revision: row.revision } : null;
+  return row ? { state: readState(row.state), revision: row.revision } : null;
 }
 export async function getOrCreateProject(id: string) {
   const [row] = await getDb().select().from(projects).where(eq(projects.id, id)).limit(1);
-  if (row) return { state: JSON.parse(row.state) as ProjectState, revision: row.revision };
+  if (row) return { state: readState(row.state), revision: row.revision };
   const state = emptyProject(id);
   await getDb().insert(projects).values({ id: state.id, title: state.title, state: JSON.stringify(state), updatedAt: state.updatedAt }).onConflictDoNothing();
   return (await getProject(id))!;
 }
 export async function saveProject(state: ProjectState, revision: number) {
+  state.artifacts = numberAnalysisRecords(state.artifacts);
   state.updatedAt = new Date().toISOString();
   const updated = await getDb().update(projects).set({
     title: state.title, state: JSON.stringify(state), revision: revision + 1, updatedAt: state.updatedAt,

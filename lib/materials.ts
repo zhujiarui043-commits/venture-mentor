@@ -27,13 +27,16 @@ export function validateMaterials(value: unknown): MaterialInput[] {
 }
 
 export function prepareMaterials(state: ProjectState, inputs: MaterialInput[], kind: ProjectState["materials"][number]["kind"]) {
-  const lastNumber = (state.materials || []).reduce((max, item) => Math.max(max, Number(item.id.slice(1)) || 0), 0);
+  const lastNumber = (state.materials || []).reduce((max, item) => {
+    const number = /^M\d+$/iu.test(item.id) ? Number(item.id.slice(1)) : 0;
+    return Number.isSafeInteger(number) && number > 0 ? Math.max(max, number) : max;
+  }, 0);
   const at = new Date().toISOString();
   return inputs.map((input,index) => ({id:`M${String(lastNumber+index+1).padStart(2,"0")}`,content:input.text,name:input.name,at,kind}));
 }
 
 export function materialContext(materials: ProjectState["materials"]) {
-  return materials.length === 1 ? materials[0].content : materials.map(item =>
+  return materials.map(item =>
     `【用户材料 ${item.id}：${item.name || "未命名材料"}】\n${item.content}`
   ).join("\n\n");
 }

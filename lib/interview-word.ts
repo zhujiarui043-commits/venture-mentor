@@ -50,7 +50,7 @@ export function interviewWordFilename(artifact: Pick<Artifact, "title" | "versio
 // Generate from the complete saved artifact, never from the collapsed preview.
 export function createInterviewWord(artifact: Artifact): Uint8Array {
   const date = new Date(artifact.createdAt);
-  const metadata = `分析成果 V${artifact.version}${Number.isNaN(date.getTime()) ? "" : ` · ${date.toISOString().slice(0, 10)}`}`;
+  const metadata = `分析记录${artifact.recordId ? ` ${artifact.recordId}` : ""} · V${artifact.version}${Number.isNaN(date.getTime()) ? "" : ` · ${date.toISOString().slice(0, 10)}`}`;
   let body = paragraph(artifact.title, "Title") + paragraph(metadata, "Subtitle") + bodyParagraphs(artifact.content);
   if (artifact.interview) {
     body += paragraph("访谈原话", "Heading1");

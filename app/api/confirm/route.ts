@@ -2,6 +2,7 @@ import { getProject, ProjectConflictError, saveProject } from "@/lib/store";
 import { currentTester, projectIdFor, unauthorized } from "@/lib/auth";
 import { attachEvidenceToVersion, isSubstantiveRevision } from "@/lib/hypothesis";
 import { proposalChanges } from "@/lib/proposal-changes";
+import { numberAnalysisRecords } from "@/lib/types";
 
 export async function POST(request: Request) {
   try {
@@ -78,7 +79,7 @@ export async function POST(request: Request) {
           const prior=priorCanvas.modules.find(x=>x.name===d.name);
           return prior&&prior.content!==d.content?[{name:d.name,previous:prior.content,current:d.content}]:[];
         });
-        state.artifacts.push({...p.artifact,id:crypto.randomUUID(),version:old.reduce((max,a)=>Math.max(max,a.version),0)+1,createdAt:confirmedAt});
+        state.artifacts = numberAnalysisRecords([...state.artifacts, {...p.artifact,id:crypto.randomUUID(),version:old.reduce((max,a)=>Math.max(max,a.version),0)+1,createdAt:confirmedAt}]);
       }
     }
     state.pending=null;

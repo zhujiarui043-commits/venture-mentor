@@ -9,14 +9,15 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const temp = await mkdtemp(join(tmpdir(), "mentor-logic-"));
 try {
   await writeFile(join(temp, "knowledge-rules.mjs"), `export default ${await readFile(join(root, "knowledge/rules.json"), "utf8")};`);
-  for (const name of ["types", "structured", "hypothesis", "memory", "proposal-changes", "workflow", "knowledge"]) {
+  for (const name of ["types", "structured", "hypothesis", "memory", "proposal-changes", "workflow", "knowledge", "materials"]) {
     const source = await readFile(join(root, "lib", `${name}.ts`), "utf8");
     const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
       .replace(/from "\.\/([a-z-]+)"/gu, 'from "./$1.mjs"')
       .replaceAll('from "@/knowledge/rules.json"', 'from "./knowledge-rules.mjs"');
     await writeFile(join(temp, `${name}.mjs`), compiled);
   }
-  const { diagnosisNames, canvasNames, emptyProject } = await import(pathToFileURL(join(temp, "types.mjs")));
+  const { diagnosisNames, canvasNames, emptyProject, numberAnalysisRecords } = await import(pathToFileURL(join(temp, "types.mjs")));
+  const { prepareMaterials, materialContext } = await import(pathToFileURL(join(temp, "materials.mjs")));
   const { missingRequiredStructure } = await import(pathToFileURL(join(temp, "structured.mjs")));
   const { isSubstantiveRevision, evidenceVersionTarget, attachEvidenceToVersion } = await import(pathToFileURL(join(temp, "hypothesis.mjs")));
   const { selectRelevantMemory } = await import(pathToFileURL(join(temp, "memory.mjs")));
@@ -24,7 +25,7 @@ try {
   const { planConversation, cleanSuggestedQuestions } = await import(pathToFileURL(join(temp, "workflow.mjs")));
   const { selectKnowledge, resolveKnowledgeTask } = await import(pathToFileURL(join(temp, "knowledge.mjs")));
 
-  for (const question of ["画布是什么意思？", "请解释八维诊断", "如何生成商业画布？", "不用生成画布，解释一下作用"]){
+  for (const question of ["画布是什么意思？", "请解释八维诊断", "如何生成商业画布？", "不用生成画布，解释一下作用", "现在有哪些访谈分析技术？"]){
     assert.equal(planConversation("canvas", question).createArtifact, false);
     assert.equal(missingRequiredStructure("canvas", "canvas", question, null), null);
   }
@@ -40,6 +41,26 @@ try {
   assert.equal(planConversation("overview","我想做一个穿搭助手，你有什么建议吗").kind,"discussion");
   assert.equal(planConversation("overview","附上材料供参考","正文").createArtifact,false);
   assert.equal(planConversation("overview","分析这份材料","正文").createArtifact,true);
+  for (const request of ["修改访谈提纲", "优化新版访谈提纲", "请帮我调整访谈提纲"])
+    assert.equal(planConversation("overview",request).createArtifact,true);
+  for (const request of ["为什么要修改访谈提纲？", "不要修改访谈提纲", "访谈提纲怎么优化？"])
+    assert.equal(planConversation("research",request).createArtifact,false);
+  const outline = {id:"original-uuid",section:"research",title:"校园访谈提纲",content:"第一题：上一次怎样挑选衣服？",version:1,sources:[],limitations:"",nextStep:"",createdAt:"2026-10-10"};
+  const numbered = numberAnalysisRecords([outline,{...outline,id:"second-uuid",version:2}]);
+  assert.deepEqual(numbered.map(item=>item.recordId),["A01","A02"]);
+  assert.deepEqual(numbered.map(item=>item.id),["original-uuid","second-uuid"]);
+  assert.equal(outline.recordId,undefined);
+  assert.deepEqual(numberAnalysisRecords(numbered),numbered);
+  assert.deepEqual(numberAnalysisRecords([...numbered,{...outline,id:"third-uuid"}]).map(item=>item.recordId),["A01","A02","A03"]);
+  const interviewState={...emptyProject("interview"),artifacts:numbered,materials:[{id:"M07",content:"真实访谈原文。",at:"2026-10-10"}]};
+  const uploaded=prepareMaterials(interviewState,[{name:"补充访谈.docx",text:"新访谈原文。"}],"访谈记录");
+  assert.equal(uploaded[0].id,"M08");
+  assert.match(materialContext(uploaded),/用户材料 M08：补充访谈.docx/u);
+  assert.equal(planConversation("research","调整第三个问题，让提问更开放","",false,interviewState).createArtifact,true);
+  assert.equal(planConversation("research","修改目标用户为上班族","",false,interviewState).createArtifact,false);
+  assert.equal(missingRequiredStructure("research","interview","生成访谈提纲",null),"可保存的访谈成果（标题和完整正文）");
+  assert.equal(missingRequiredStructure("research","interview","更新访谈提纲",{title:"新版提纲",content:"完整问题清单"}),null);
+  assert.equal(missingRequiredStructure("research","interview","更新访谈提纲",{title:"新版提纲",content:" "}),"可保存的访谈成果（标题和完整正文）");
   assert.deepEqual(cleanSuggestedQuestions([" 下一步做什么？ ","下一步做什么？","","字".repeat(91),"设计访谈提纲","生成商业画布","第四项"]),["下一步做什么？","设计访谈提纲","生成商业画布"]);
 
   const savedProject = emptyProject("changes");
@@ -83,6 +104,7 @@ try {
   state.messages.push({role:"user",content:"我想了解此前的问卷样本",at:"2026-10-04"},...Array.from({length:16},()=>({role:"assistant",content:"其他信息",at:"2026-10-04"})));
   const memory=selectRelevantMemory(state,"research","查看之前问卷样本和 M04");
   assert.equal(memory.archivedArtifacts[0].id,"A0");
+  assert.equal(selectRelevantMemory(state,"canvas","查看 A01").archivedArtifacts[0].recordId,"A01");
   assert.equal(memory.materials[0].id,"M04");
   assert.equal(memory.userMessages[0].content,"我想了解此前的问卷样本");
   console.log("结构化成果、证据版本与历史检索检查通过");

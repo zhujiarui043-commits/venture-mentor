@@ -9,7 +9,7 @@ export function AnalysisRecord({artifact: a, children}: {artifact: Artifact; chi
   return <article className="artifact-card">
     <details className="analysis-record">
       <summary>
-        <div className="artifact-top"><span>分析成果 · V{a.version}</span><time dateTime={a.createdAt}>{new Date(a.createdAt).toLocaleDateString("zh-CN")}</time></div>
+        <div className="artifact-top"><span>分析记录{a.recordId ? ` ${a.recordId}` : ""} · V{a.version}</span><time dateTime={a.createdAt}>{new Date(a.createdAt).toLocaleDateString("zh-CN")}</time></div>
         <div className="record-heading"><h3>{a.title}</h3><ChevronRight size={19} className="record-chevron" aria-hidden="true"/></div>
         {preview && <p className="record-preview">{preview}</p>}
         <span className="record-toggle"><span className="record-expand-label">展开完整内容</span><span className="record-collapse-label">收起内容</span></span>

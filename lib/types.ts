@@ -66,6 +66,7 @@ export type Competitor = { name: string; kind: string; audience: string; task: s
 export type CompetitionData = { scope: string; competitors: Competitor[]; gap: string; counterExplanation: string; unknowns: string[]; webSearch?: WebSearchSnapshot };
 export type Artifact = {
   id: string; section: Section; title: string; content: string; sources: Source[];
+  recordId?: string;
   limitations: string; nextStep: string; version: number; createdAt: string;
   diagnosis?: DiagnosisData;
   interview?: InterviewAnalysis;
@@ -113,4 +114,21 @@ export const sectionLabels: Record<Section, string> = {
 };
 export function emptyProject(id: string): ProjectState {
   return { id, title: "未命名项目", rawIdea: "", fields: {}, fieldStatuses: {}, fieldMeta: {}, hypotheses: [], artifacts: [], messages: [], materials: [], pending: null, updatedAt: new Date().toISOString() };
+}
+
+// Analysis numbers have their own sequence; UUIDs and material references stay intact.
+export function numberAnalysisRecords(artifacts: Artifact[]): Artifact[] {
+  const recordNumber = (id?: string) => /^A\d+$/iu.test(id || "") ? Number(id!.slice(1)) : 0;
+  let last = artifacts.reduce((max, artifact) => {
+    const number = recordNumber(artifact.recordId);
+    return Number.isSafeInteger(number) && number > 0 ? Math.max(max, number) : max;
+  }, 0);
+  const assigned = new Set<number>();
+  return artifacts.map(artifact => {
+    const number = recordNumber(artifact.recordId);
+    const next = Number.isSafeInteger(number) && number > 0 && !assigned.has(number) ? number : ++last;
+    assigned.add(next);
+    const recordId = `A${String(next).padStart(2, "0")}`;
+    return artifact.recordId === recordId ? artifact : {...artifact, recordId};
+  });
 }

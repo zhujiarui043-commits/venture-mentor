@@ -288,6 +288,8 @@ try {
   assert.equal(storage.project.state.pending.fieldMeta.scene.sourceRef,"M02");
   assert.equal((await confirm(new Request("https://example.com/api/confirm",{method:"POST",headers:{cookie},body:JSON.stringify({projectId:state.id,proposalId:storage.project.state.pending.id,accept:true})}))).status,200);
   assert.deepEqual(storage.project.state.hypotheses[0].evidenceRecords.map(item=>item.sourceId),["M01","M02"]);
+  assert.equal(storage.project.state.artifacts[0].recordId,"A01");
+  assert.deepEqual(storage.project.state.materials.map(item=>item.id),["M01","M02"]);
 
   for(const [changes,status] of [[{references:null},400],[{references:[{name:"空.docx",text:""}]},400],[{references:Array.from({length:6},()=>({name:"访谈.docx",text:"内容"}))},400],[{references:[{name:"长.docx",text:"字".repeat(12001)}]},413],[{references:Array.from({length:4},()=>({name:"满.docx",text:"字".repeat(12000)}))},413],[{references,referenceText:"重复提交"},400]]){
     reset();assert.equal((await POST(request({webSearch:false,...changes}))).status,status);assert.equal(storage.saves,0);assert.equal(deepseekCalls,0);
@@ -349,6 +351,52 @@ try {
   assert.equal((await POST(request({webSearch:false,section:"overview",message:"生成八维创意诊断"}))).status,500);
   assert.equal(deepseekCalls,2);assert.equal(storage.saves,0);
   assert.equal(storage.project.state.pending,null);
+
+  // Revising an outline must save a full analysis record, without consuming material IDs.
+  reset();
+  const outline={title:"校园访谈提纲",content:"一、招募对象\n近期有挑选衣服经历的大学生。\n二、问题\n请回忆上次挑选衣服的过程。"+"\n其他经历追问。".repeat(180)+"\n末尾问题：还有什么容易被忽略的情况？",limitations:"提纲尚未试访",nextStep:"试访两人",sourceLabels:[]};
+  storage.project.state.materials=[{id:"M07",name:"原始访谈.docx",content:"访谈原文：挑选衣服花了二十分钟。",at:"2026-10-10"}];
+  storage.project.state.artifacts=[{...outline,sourceLabels:undefined,sources:[],id:"old-outline-uuid",section:"research",version:1,createdAt:"2026-10-09"},{...outline,sourceLabels:undefined,sources:[],id:"old-canvas-uuid",section:"canvas",title:"商业画布",version:1,createdAt:"2026-10-09"}];
+  const revised={...outline,content:outline.content+"\n第三题：当时尝试了哪些解决方式？"};
+  repairResponses=[{...plainReply,reply:"新版访谈提纲只在聊天里。"},{...plainReply,reply:"已生成新版，请确认保存。",artifact:revised}];
+  assert.equal((await POST(request({webSearch:false,section:"overview",message:"优化新版访谈提纲"}))).status,200);
+  assert.equal(deepseekCalls,2);
+  assert.ok(calls[0].payload.messages[0].content.includes("末尾问题：还有什么容易被忽略的情况？"));
+  assert.equal(storage.project.state.pending.artifact.section,"research");
+  assert.equal(storage.project.state.artifacts.length,2);
+  const acceptOutline=()=>confirm(new Request("https://example.com/api/confirm",{method:"POST",headers:{cookie},body:JSON.stringify({projectId:state.id,proposalId:storage.project.state.pending.id,accept:true})}));
+  assert.equal((await acceptOutline()).status,200);
+  assert.deepEqual(storage.project.state.artifacts.map(item=>item.recordId),["A01","A02","A03"]);
+  assert.equal(storage.project.state.artifacts.at(-1).version,2);
+  assert.equal(storage.project.state.artifacts[0].id,"old-outline-uuid");
+  assert.equal(storage.project.state.artifacts[0].content,outline.content);
+  assert.deepEqual(storage.project.state.materials.map(item=>item.id),["M07"]);
+
+  repairResponses=[{...plainReply,artifact:{...revised,content:revised.content+"\n追加追问：还有其他选择吗？"}}];
+  assert.equal((await POST(request({webSearch:false,section:"research",message:"调整第三个问题，让提问更开放"}))).status,200);
+  assert.equal(storage.project.state.pending.artifact.section,"research");
+  assert.equal((await acceptOutline()).status,200);
+  assert.equal(storage.project.state.artifacts.at(-1).recordId,"A04");
+  assert.equal(storage.project.state.artifacts.at(-1).version,3);
+
+  repairResponses=[{...plainReply,artifact:revised}];
+  assert.equal((await POST(request({webSearch:false,section:"research",message:"更新访谈提纲，参考这份访谈记录",references:[{name:"补充访谈.docx",text:"补充原文：还会问同学的意见。"}]}))).status,200);
+  assert.equal(storage.project.state.materials.at(-1).id,"M08");
+  assert.match(calls.at(-1).payload.messages.at(-1).content,/用户材料 M08：补充访谈.docx/u);
+  assert.equal((await acceptOutline()).status,200);
+  assert.equal(storage.project.state.artifacts.at(-1).recordId,"A05");
+  assert.deepEqual(storage.project.state.materials.map(item=>item.id),["M07","M08"]);
+  assert.ok(storage.project.state.artifacts.at(-1).sources.some(source=>source.label.includes("M08")));
+
+  const savedBeforeMissing=structuredClone(storage.project), savesBeforeMissing=storage.saves;
+  repairResponses=[plainReply,{...plainReply,artifact:{...outline,content:" "}}];
+  assert.equal((await POST(request({webSearch:false,section:"research",message:"重新生成访谈提纲"}))).status,500);
+  assert.equal(storage.saves,savesBeforeMissing);
+  assert.deepEqual(storage.project,savedBeforeMissing);
+  repairResponses=[plainReply];
+  assert.equal((await POST(request({webSearch:false,section:"research",message:"访谈提纲怎么优化？"}))).status,200);
+  assert.equal(storage.project.state.pending,null);
+  assert.equal(storage.project.state.artifacts.length,5);
 
   const networkMock=globalThis.fetch;
   const originalTimeout=AbortSignal.timeout;

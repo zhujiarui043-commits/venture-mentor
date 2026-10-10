@@ -1,4 +1,4 @@
-import { sectionLabels, type ProjectState, type Section } from "./types";
+import { numberAnalysisRecords, sectionLabels, type ProjectState, type Section } from "./types";
 
 const common = new Set(["这个","那个","项目","问题","分析","帮我","一下","之前","生成","当前","需要","应该","可以","什么","还有","我们","我的","是否","如何","结果"]);
 
@@ -31,13 +31,13 @@ function excerpt(text: string, terms: string[], limit: number) {
 
 export function selectRelevantMemory(state: ProjectState, section: Section, message: string) {
   const terms = queryTerms(message);
-  const explicitIds = new Set((message.match(/\b(?:H|M)\d{2,}\b/giu) || []).map(id => id.toUpperCase()));
-  const archivedArtifacts = state.artifacts.slice(0, -3).map((a, index) => ({
+  const explicitIds = new Set((message.match(/\b(?:H|M|A)\d{2,}\b/giu) || []).map(id => id.toUpperCase()));
+  const archivedArtifacts = numberAnalysisRecords(state.artifacts).slice(0, -3).map((a, index) => ({
     value: a,
-    score: relevance(`${a.title} ${a.content} ${a.limitations} ${a.nextStep}`, terms) + (a.section === section ? 3 : 0) + (explicitIds.has(a.id.toUpperCase()) ? 20 : 0),
+    score: relevance(`${a.title} ${a.content} ${a.limitations} ${a.nextStep}`, terms) + (a.section === section ? 3 : 0) + (explicitIds.has(a.recordId!.toUpperCase()) ? 20 : 0),
     index,
   })).filter(x => x.score > 0).sort((a, b) => b.score - a.score || b.index - a.index).slice(0, 3).map(({ value: a }) => ({
-    id:a.id, section:sectionLabels[a.section], version:a.version, title:a.title,
+    id:a.id, recordId:a.recordId, section:sectionLabels[a.section], version:a.version, title:a.title,
     content:excerpt(a.content,terms,1000), limitations:a.limitations.slice(0,280), nextStep:a.nextStep.slice(0,280),
   }));
   const materials = (state.materials || []).map((m, index) => ({

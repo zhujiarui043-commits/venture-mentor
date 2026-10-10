@@ -36,7 +36,7 @@ export async function POST(request: Request) {
     const messageId=crypto.randomUUID();
     const requestedSection=validSection(body.section);
     if (body.webSearch && requestedSection !== "competitors") return Response.json({error:"请在竞品洞察中使用联网搜索"},{status:400});
-    const plan=planConversation(requestedSection,message,referenceText,!!body.webSearch);
+    const plan=planConversation(requestedSection,message,referenceText,!!body.webSearch,project.state);
     const section=plan.section;
     const secrets = env as unknown as Record<string, string>;
     if (body.webSearch && !secrets.DEEPSEEK_API_KEY?.trim())

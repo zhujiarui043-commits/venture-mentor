@@ -53,6 +53,9 @@ try {
   assert.match(record, /<details class="analysis-record">/u);
   assert.ok(!/<details[^>]*\bopen[=> ]/u.test(record));
   assert.ok(record.includes(questions.at(-1)) && record.includes("导出 Word"));
+  const numberedRecord = renderToStaticMarkup(createElement(AnalysisRecord, {artifact:{...artifact,recordId:"A09"}}, "完整提纲"));
+  assert.ok(numberedRecord.includes("分析记录 A09 · V3"));
+  assert.ok((await mammoth.extractRawText({buffer:Buffer.from(createInterviewWord({...artifact,recordId:"A09"}))})).value.includes("分析记录 A09 · V3"));
   // Export must stay outside the toggle, available even when the record is closed.
   assert.ok(record.indexOf("record-actions") > record.indexOf("</details>"));
   for (const section of ["overview", "diagnosis", "competitors", "hypotheses", "research", "canvas"]) {
@@ -124,6 +127,41 @@ try {
     }
     await page.screenshot({path:join(screenshots, "mobile.png"), fullPage:true});
     assert.deepEqual(errors, []);
+    // Check the actual workspace, including legacy records without analysis numbers.
+    await writeFile(join(uiDir,"studio.html"), '<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head><body><div id="root"></div><script type="module" src="/studio.tsx"></script></body></html>');
+    await writeFile(join(uiDir,"studio.tsx"), "import React from 'react';import {createRoot} from 'react-dom/client';import Studio from '@/app/studio';import {ThemeProvider} from '@/components/theme-provider';import '@/app/globals.css';createRoot(document.getElementById('root')!).render(<ThemeProvider><Studio/></ThemeProvider>);");
+    const studioPage=await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true});
+    const studioErrors=[];studioPage.on("pageerror",error=>studioErrors.push(error.message));
+    const revisedContent=artifact.content+"\n新版追加追问：当时还有哪些替代选择？";
+    const studioState={id:"team-owner",title:"穿搭助手",rawIdea:"",fields:{solution:"校园穿搭助手"},fieldStatuses:{},fieldMeta:{},hypotheses:[],pending:null,updatedAt:"2026-10-10",messages:[],materials:[{id:"M01",name:"第一份访谈.docx",content:"第一份真实访谈原文。",at:"2026-10-09"},{id:"M02",name:"补充访谈.docx",content:"第二份真实访谈原文。",at:"2026-10-10"}],artifacts:[{...artifact,id:"old-outline-uuid",version:1},{...artifact,id:"new-outline-uuid",version:2,title:"新版校园访谈提纲",content:revisedContent,sources:[{label:"用户材料 M02 · 补充访谈.docx"}]}]};
+    await studioPage.route("**/api/project",route=>route.fulfill({json:{state:studioState,revision:3}}));
+    await studioPage.goto(`http://127.0.0.1:${port}/studio.html`);
+    await studioPage.getByRole("button",{name:"调研验证",exact:true}).click();
+    await studioPage.getByRole("heading",{name:"分析记录",exact:true}).waitFor();
+    const materialSummaries=await studioPage.locator(".material-card>summary").allTextContents();
+    assert.ok(materialSummaries[0].startsWith("材料 M01 · 第一份访谈.docx"));
+    assert.ok(materialSummaries[1].startsWith("材料 M02 · 补充访谈.docx"));
+    const records=studioPage.locator(".analysis-record");
+    assert.equal(await records.count(),2);
+    assert.deepEqual(await records.evaluateAll(nodes=>nodes.map(node=>node.open)),[false,false]);
+    assert.equal(await records.first().locator(".artifact-top span").textContent(),"分析记录 A02 · V2");
+    assert.equal(await records.nth(1).locator(".artifact-top span").textContent(),"分析记录 A01 · V1");
+    assert.equal(await records.first().locator(".artifact-content").isVisible(),false);
+    await records.first().locator("summary").first().click();
+    assert.ok(await records.first().locator(".artifact-content").isVisible());
+    assert.ok((await records.first().locator(".artifact-content").textContent()).includes("新版追加追问"));
+    await records.first().locator("summary").first().click();
+    const studioDownloadPromise=studioPage.waitForEvent("download");
+    await studioPage.locator(".word-export-button").first().click();
+    const studioDownload=await studioDownloadPromise;
+    const studioStream=await studioDownload.createReadStream(), studioChunks=[];
+    for await (const chunk of studioStream) studioChunks.push(chunk);
+    const studioWord=(await mammoth.extractRawText({buffer:Buffer.concat(studioChunks)})).value;
+    assert.ok(studioWord.includes("分析记录 A02 · V2") && studioWord.includes("新版追加追问"));
+    assert.ok(studioWord.includes("用户材料 M02 · 补充访谈.docx"));
+    await studioPage.screenshot({path:join(screenshots,"research-workspace.png"),fullPage:true});
+    assert.deepEqual(studioErrors,[]);
+    await studioPage.close();
     console.log("浏览器验收通过：鼠标和键盘展开/收起、折叠时一键下载完整 Word、产品卡片、桌面/平板/手机排版。");
   }
 } finally {
