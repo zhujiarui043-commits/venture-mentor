@@ -5,11 +5,11 @@ import { selectKnowledge } from "./knowledge";
 import { missingRequiredStructure } from "./structured";
 import { evidenceVersionTarget } from "./hypothesis";
 import { selectRelevantMemory } from "./memory";
-import { groundCompetition } from "./competitor-search";
+import { buildCompetitorQuery, groundCompetition, searchCompetitors } from "./competitor-search";
 import { completeWithSearch, groundReplyCitations, searchAllowed, type SearchContext } from "./agent-search";
 import { proposalChanges } from "./proposal-changes";
 import { cleanSuggestedQuestions, planConversation } from "./workflow";
-import { proposeSearchComparison } from "./competitor-analysis";
+import { proposeCompetitionRevision, proposeSearchComparison } from "./competitor-analysis";
 
 const outputSchema = z.object({
   reply: z.string().min(1),
@@ -55,6 +55,14 @@ export async function propose(state: ProjectState, section: Section, message: st
   const searchContext: SearchContext = {enabled:searchAllowed(message,allowWebSearch),manual:manualSearch,snapshot:webSearch,apiKey:(env as unknown as Record<string,string>).TAVILY_API_KEY};
   if (!key) throw new Error("请先在右上角设置中填入 DeepSeek API Key。密钥只保留在当前浏览器会话，不写入项目记录。");
   if (manualSearch && webSearch) return proposeSearchComparison(state,message,referenceText,webSearch,key);
+  const savedCompetition = state.artifacts.filter(artifact => artifact.section === "competitors" && artifact.competition).at(-1);
+  if (section === "competitors" && plan.createArtifact && savedCompetition?.competition) {
+    if (searchAllowed(message,allowWebSearch) && /联网|重新搜索|最新.*(?:竞品|产品|价格)|(?:竞品|产品|价格).*最新/u.test(message)) {
+      const snapshot = await searchCompetitors(buildCompetitorQuery(state,message),(env as unknown as Record<string,string>).TAVILY_API_KEY);
+      return proposeSearchComparison(state,message,referenceText,snapshot,key);
+    }
+    return proposeCompetitionRevision(state,message,referenceText,{...savedCompetition,competition:savedCompetition.competition},key);
+  }
   const firstTurn = !state.messages.some(item => item.role === "user");
   const unsure = /不知道|不确定|没想过|尚未调研|还没调研|描述不出|想象的|只是设想|没有具体(?:经历|案例|场景)/u.test(message);
   const conversationHint = unsure

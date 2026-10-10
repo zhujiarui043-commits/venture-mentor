@@ -1,8 +1,11 @@
 import { ChevronRight } from "lucide-react";
-import type { CompetitionData } from "@/lib/types";
+import type { CompetitionData, Competitor, CompetitorCitation } from "@/lib/types";
 import { SourceLink, WebSources } from "./source-links";
 
 const labels = {audience:"目标用户", task:"任务", feature:"功能", price:"价格", limitation:"限制"};
+function fieldValue(competitor: Competitor, field: CompetitorCitation["field"]) {
+  return `${competitor[field] || "待核实"}${competitor.unverifiedFields?.includes(field) ? "（用户补充，待核实）" : ""}`;
+}
 
 // The overview is the only comparison table; sources live in the records below.
 export function CompetitionTable({competition}: {competition: CompetitionData}) {
@@ -15,8 +18,8 @@ export function CompetitionTable({competition}: {competition: CompetitionData}) 
         <thead><tr><th scope="col">对象 / 类别</th><th scope="col">用户与任务</th><th scope="col">功能 / 价格</th></tr></thead>
         <tbody>{competition.competitors.map((c, i) => <tr key={i}>
           <th scope="row"><strong>{c.name}</strong><small>{c.kind}</small></th>
-          <td><div>{c.audience}</div><div className="comparison-attribute"><span>任务</span>{c.task}</div></td>
-          <td><div>{c.feature}</div><div className="comparison-attribute"><span>价格</span>{c.price}</div><div className="comparison-attribute"><span>限制</span>{c.limitation}</div></td>
+          <td><div>{fieldValue(c,"audience")}</div><div className="comparison-attribute"><span>任务</span>{fieldValue(c,"task")}</div></td>
+          <td><div>{fieldValue(c,"feature")}</div><div className="comparison-attribute"><span>价格</span>{fieldValue(c,"price")}</div><div className="comparison-attribute"><span>限制</span>{fieldValue(c,"limitation")}</div></td>
         </tr>)}</tbody>
       </table>
     </div> : <p>本轮尚无有来源支持的可比较对象。展开下方记录查看网页来源，或调整搜索词。</p>}
@@ -32,7 +35,7 @@ export function CompetitionDetails({competition}: {competition: CompetitionData}
         <ChevronRight size={17} className="record-chevron" aria-hidden="true"/>
       </summary>
       <div className="competitor-detail-body">
-        <dl>{(Object.keys(labels) as (keyof typeof labels)[]).map(field => <div key={field}><dt>{labels[field]}</dt><dd>{c[field] || "待核实"}</dd></div>)}</dl>
+        <dl>{(Object.keys(labels) as (keyof typeof labels)[]).map(field => <div key={field}><dt>{labels[field]}</dt><dd>{fieldValue(c,field)}</dd></div>)}</dl>
         <div className="competitor-source">
           <h5>来源与核实状态</h5><p>{c.verification}</p>
           {c.sourceId ? <>

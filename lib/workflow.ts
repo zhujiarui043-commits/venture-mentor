@@ -8,7 +8,8 @@ export type ConversationPlan = {
 };
 
 const revision = /修改|改写|修订|调整|完善|优化|重写|迭代/u;
-const action = /生成|整理|更新|制作|制定|设计|编写|拟定|输出|拆出|分析|评估|诊断|修改|改写|修订|调整|完善|优化|重写|迭代|做(?:一份|一张|一个)/u;
+const competitorEdit = /修改|改写|修订|调整|完善|优化|重写|更新|删除|删掉|移除|去掉|改成|改为|替换|补充|添加|增加|只保留|仅保留/u;
+const action = /生成|整理|更新|制作|制定|设计|编写|拟定|输出|拆出|分析|评估|诊断|修改|改写|修订|调整|完善|优化|重写|迭代|删除|删掉|移除|去掉|改成|改为|替换|补充|添加|增加|只保留|仅保留|做(?:一份|一张|一个)/u;
 const targets: [Section, RegExp][] = [
   ["canvas", /商业模式画布|商业画布|九格画布|画布/u],
   ["diagnosis", /八维|诊断|评估.*(?:项目|创业|想法)|(?:项目|创业|想法).*评估/u],
@@ -20,7 +21,7 @@ const targets: [Section, RegExp][] = [
 function actionableClauses(message: string) {
   return message.split(/[，,。；;\n]/u).filter(clause => {
     if (!action.test(clause)) return false;
-    if (/(?:不要|不用|无需|别|暂不|暂时不)\s*(?:再|帮我|给我)?\s*(?:生成|整理|更新|制作|制定|设计|编写|拟定|输出|分析|评估|诊断|修改|改写|修订|调整|完善|优化|重写|迭代)/u.test(clause)) return false;
+    if (/(?:不要|不用|无需|别|暂不|暂时不)\s*(?:再|帮我|给我)?\s*(?:生成|整理|更新|制作|制定|设计|编写|拟定|输出|分析|评估|诊断|修改|改写|修订|调整|完善|优化|重写|迭代|删除|删掉|移除|去掉|改成|改为|替换|补充|添加|增加|只保留|仅保留)/u.test(clause)) return false;
     // Asking how to perform a task is still a question, unless execution is explicit.
     if (/解释|介绍|什么是|是什么意思|有哪些|有什么|有没有|原理|为什么|如何|怎么/u.test(clause)
       && !/(?:帮我|给我|请你|请帮我)\s*(?:生成|整理|更新|制作|制定|设计|编写|拟定|输出|分析|评估|诊断|修改|改写|修订|调整|完善|优化|重写|迭代)/u.test(clause)) return false;
@@ -34,6 +35,10 @@ export function planConversation(section: Section, message: string, referenceTex
   const clauses = actionableClauses(message);
   const target = targets.find(([, pattern]) => clauses.some(clause => pattern.test(clause)))?.[0];
   if (target) return { section: target, kind: "artifact", label: `${sectionLabels[target]}任务`, createArtifact: true };
+  const lastCompetition = state?.artifacts.filter(artifact => artifact.section === "competitors" && artifact.competition).at(-1)?.competition;
+  if (lastCompetition && (section === "competitors" || state?.messages.at(-1)?.task?.section === "competitors")
+    && clauses.some(clause => competitorEdit.test(clause) && (/类别|分类|功能|价格|对照|表格|范围|差异|缺口|反向|待核|对象|标题|限制|下一步|这份|这版/u.test(clause) || lastCompetition.competitors.some(candidate => clause.includes(candidate.name)))))
+    return {section:"competitors",kind:"artifact",label:"竞品分析修订",createArtifact:true};
   const lastResearch = state?.artifacts.filter(artifact => artifact.section === "research").at(-1);
   const continuingInterview = lastResearch && !lastResearch.mvp && !lastResearch.survey && !lastResearch.funnel
     && /访谈|采访|提纲|招募/u.test(lastResearch.title + "\n" + lastResearch.content)

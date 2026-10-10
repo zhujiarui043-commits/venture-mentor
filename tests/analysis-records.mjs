@@ -75,6 +75,9 @@ try {
   assert.ok(empty.includes("网页摘录") && empty.includes("https://example.com/product"));
   const unsafe = renderToStaticMarkup(createElement(CompetitionDetails, {competition:{...competition, competitors:[{...competition.competitors[0], sourceUrl:"javascript:alert(1)", citations:[]}]}}));
   assert.ok(!unsafe.includes("href=\"javascript:"));
+  const userCorrection={...competition,competitors:[{...competition.competitors[0],price:"99元",unverifiedFields:["price"],verification:"待核实"}]};
+  assert.ok(renderToStaticMarkup(createElement(CompetitionTable,{competition:userCorrection})).includes("99元（用户补充，待核实）"));
+  assert.ok(renderToStaticMarkup(createElement(CompetitionDetails,{competition:userCorrection})).includes("99元（用户补充，待核实）"));
   console.log("分析记录与 Word 检查通过：默认折叠、完整正文、各模块记录、导出按钮位置、DOCX格式与中文、三列对照、非表格产品详情、来源保留。");
 
   if (process.argv.includes("--browser")) {
@@ -162,6 +165,41 @@ try {
     await studioPage.screenshot({path:join(screenshots,"research-workspace.png"),fullPage:true});
     assert.deepEqual(studioErrors,[]);
     await studioPage.close();
+
+    const competitionPage=await browser.newPage({viewport:{width:1440,height:1000}});
+    const competitionErrors=[];competitionPage.on("pageerror",error=>competitionErrors.push(error.message));
+    const oldCompetitionRecord={...artifact,id:"competition-original",section:"competitors",title:"竞品比较",version:1,competition};
+    const newComparison={...competition,competitors:[{...competition.competitors[0],kind:"替代方式",price:"99元",unverifiedFields:["price"],verification:"待核实",citations:competition.competitors[0].citations.filter(citation=>citation.field !== "price")}]};
+    const editedArtifact={...oldCompetitionRecord,id:"competition-edited",version:2,competition:newComparison};
+    let competitionState={...studioState,messages:[],artifacts:[oldCompetitionRecord],pending:null};
+    await competitionPage.route("**/api/project",route=>route.fulfill({json:{state:competitionState,revision:1}}));
+    await competitionPage.route("**/api/agent",route=>{
+      const request=route.request().postDataJSON();
+      assert.equal(request.section,"competitors");assert.equal(request.webSearch,false);
+      competitionState={...competitionState,pending:{id:"competition-edit-proposal",fields:{},fieldRemovals:[],evidence:[],hypothesis:null,reply:"已整理本次竞品修改。",createdAt:"2026-10-10",artifact:editedArtifact}};
+      return route.fulfill({json:{state:competitionState,revision:2}});
+    });
+    await competitionPage.route("**/api/confirm",route=>{
+      assert.equal(route.request().postDataJSON().accept,true);
+      competitionState={...competitionState,artifacts:[oldCompetitionRecord,editedArtifact],pending:null};
+      return route.fulfill({json:{state:competitionState,revision:3}});
+    });
+    await competitionPage.goto(`http://127.0.0.1:${port}/studio.html`);
+    await competitionPage.getByRole("button",{name:"竞品洞察",exact:true}).click();
+    await competitionPage.locator(".competition-table").waitFor();
+    await competitionPage.getByPlaceholder("描述想法、提出问题或说明要分析什么…").fill(`把${competition.competitors[0].name}的类别改成替代方式，价格改成99元`);
+    await competitionPage.getByRole("button",{name:"发送",exact:true}).click();
+    await competitionPage.getByRole("button",{name:"确认保存",exact:true}).waitFor();
+    assert.ok((await competitionPage.locator(".competition-table").textContent()).includes(competition.competitors[0].price));
+    await competitionPage.getByRole("button",{name:"确认保存",exact:true}).click();
+    await competitionPage.waitForFunction(()=>document.querySelector(".competition-table")?.textContent?.includes("99元（用户补充，待核实）"));
+    assert.equal(await competitionPage.locator(".analysis-record").count(),2);
+    assert.equal(await competitionPage.locator(".analysis-record").first().locator(".artifact-top span").textContent(),"分析记录 A02 · V2");
+    assert.deepEqual(await competitionPage.locator(".analysis-record").evaluateAll(nodes=>nodes.map(node=>node.open)),[false,false]);
+    assert.deepEqual(competitionState.artifacts[0],oldCompetitionRecord);
+    await competitionPage.screenshot({path:join(screenshots,"competition-revision.png"),fullPage:true});
+    assert.deepEqual(competitionErrors,[]);
+    await competitionPage.close();
     console.log("浏览器验收通过：鼠标和键盘展开/收起、折叠时一键下载完整 Word、产品卡片、桌面/平板/手机排版。");
   }
 } finally {

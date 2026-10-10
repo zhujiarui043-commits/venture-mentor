@@ -398,6 +398,101 @@ try {
   assert.equal(storage.project.state.pending,null);
   assert.equal(storage.project.state.artifacts.length,5);
 
+  // Competition edits use their own small format and the complete saved source set.
+  reset();
+  const oldComparison={...normalized,competitors:[normalized.competitors[0],{name:"Excel",kind:"替代方式",audience:"待核实",task:"待核实",feature:"待核实",price:"待核实",limitation:"待核实",sourceId:"",sourceQuote:"",sourceDate:"",verification:"待核实"}]};
+  const oldCompetitionRecord={id:"old-competition-uuid",recordId:"A01",section:"competitors",title:"联网竞品比较",content:"候选产品与来源见展开内容。",sources:snapshot.results.map(source=>({label:source.id,url:source.url,detail:source.content,retrievedAt:snapshot.searchedAt})),limitations:"网页仍待核对",nextStep:"回查定价",version:1,createdAt:"2026-10-09",competition:oldComparison};
+  storage.project.state.artifacts=[structuredClone(oldCompetitionRecord)];
+  storage.project.state.materials=[{id:"M07",content:"较早的用户材料。",at:"2026-10-09"}];
+  const revisionRequest=message=>request({webSearch:false,section:"competitors",message,allowWebSearch:false});
+  const acceptCompetition=accept=>confirm(new Request("https://example.com/api/confirm",{method:"POST",headers:{cookie},body:JSON.stringify({projectId:state.id,proposalId:storage.project.state.pending.id,accept})}));
+  repairResponses=[{fields:null,evidence:null,artifact:{diagnosis:null,content:null,sourceLabels:null,competition:{competitors:[{name:"Dovetail",kind:"间接竞品",price:null,citations:null}],gap:"先验证小团队是否需要更轻量的工具",unknowns:null}}}];
+  assert.equal((await POST(revisionRequest("把Dovetail的类别改成间接竞品，修改竞品差异分析"))).status,200);
+  assert.equal(tavilyCalls,0);
+  assert.equal(deepseekCalls,1);
+  assert.equal(calls[0].payload.tools,undefined);
+  const revisionContext=JSON.parse(calls[0].payload.messages.at(-1).content);
+  assert.equal(revisionContext.savedCompetition.competitors[0].price,"$29 per month");
+  assert.deepEqual(revisionContext.savedCompetition.webSearch,snapshot);
+  assert.equal(storage.project.state.pending.artifact.competition.competitors.length,2);
+  assert.equal(storage.project.state.pending.artifact.competition.competitors[0].kind,"间接竞品");
+  assert.equal(storage.project.state.pending.artifact.competitors,undefined);
+  assert.deepEqual(storage.project.state.pending.artifact.competition.competitors[0].citations,oldComparison.competitors[0].citations);
+  assert.deepEqual(storage.project.state.pending.artifact.competition.competitors[1],oldComparison.competitors[1]);
+  assert.deepEqual(storage.project.state.pending.artifact.sources,oldCompetitionRecord.sources);
+  assert.equal(storage.project.state.artifacts.length,1);
+  assert.equal((await acceptCompetition(true)).status,200);
+  assert.equal(storage.project.state.artifacts.at(-1).version,2);
+  assert.equal(storage.project.state.artifacts.at(-1).recordId,"A02");
+  assert.deepEqual(storage.project.state.artifacts[0],oldCompetitionRecord);
+  assert.deepEqual(storage.project.state.fields,state.fields);
+
+  const priceEdit={changes:{competitors:[{index:1,price:"99元",citations:null}],unknowns:null}};
+  repairResponses=[priceEdit];
+  assert.equal((await POST(revisionRequest("把Dovetail的价格改成99元"))).status,200);
+  let revisedProduct=storage.project.state.pending.artifact.competition.competitors[0];
+  assert.equal(revisedProduct.price,"99元");
+  assert.deepEqual(revisedProduct.unverifiedFields,["price"]);
+  assert.equal(revisedProduct.verification,"待核实");
+  assert.ok(!revisedProduct.citations.some(citation=>citation.field === "price"));
+  assert.equal((await acceptCompetition(false)).status,200);
+  assert.equal(storage.project.state.artifacts.length,2);
+  assert.equal(storage.project.state.artifacts.at(-1).competition.competitors[0].price,"$29 per month");
+
+  repairResponses=[{changes:{competitors:[{index:1,feature:"访谈内容整理",citations:[{field:"feature",sourceId:"W01",quote:"analyze interviews",url:"https://forged.example"}]}]}}];
+  assert.equal((await POST(revisionRequest("修改Dovetail功能的表述"))).status,200);
+  revisedProduct=storage.project.state.pending.artifact.competition.competitors[0];
+  assert.equal(revisedProduct.feature,"访谈内容整理");
+  assert.equal(revisedProduct.citations.find(citation=>citation.field === "feature").url,"https://example.com/dovetail");
+  assert.equal(revisedProduct.citations.find(citation=>citation.field === "feature").retrievedAt,snapshot.searchedAt);
+  assert.equal(revisedProduct.price,"$29 per month");
+  assert.equal((await acceptCompetition(true)).status,200);
+
+  repairResponses=[{changes:{removeIndices:[2]}}];
+  assert.equal((await POST(revisionRequest("删除Excel"))).status,200);
+  assert.equal(storage.project.state.pending.artifact.competition.competitors.length,1);
+  assert.equal((await acceptCompetition(true)).status,200);
+  assert.equal(storage.project.state.artifacts.at(-2).competition.competitors.length,2);
+
+  repairResponses=[{changes:{add:[{name:"BetaTool",kind:"候选产品",sourceId:"M08",sourceQuote:"BetaTool supports interview summaries.",feature:"访谈总结",price:"捏造价格",citations:[{field:"feature",sourceId:"M08",quote:"interview summaries"}]}]}}];
+  assert.equal((await POST(request({webSearch:false,section:"competitors",message:"添加BetaTool到竞品表",references:[{name:"产品资料.docx",text:"BetaTool supports interview summaries."}]}))).status,200);
+  const newProduct=storage.project.state.pending.artifact.competition.competitors.at(-1);
+  assert.equal(newProduct.name,"BetaTool");
+  assert.equal(newProduct.feature,"访谈总结");
+  assert.equal(newProduct.price,"待核实");
+  assert.equal(newProduct.sourceId,"M08");
+  assert.equal(newProduct.citations[0].sourceId,"M08");
+  assert.equal((await acceptCompetition(true)).status,200);
+  assert.equal(storage.project.state.artifacts.at(-1).version,5);
+  assert.deepEqual(storage.project.state.materials.map(material=>material.id),["M07","M08"]);
+
+  const beforeFailedEdit=structuredClone(storage.project), savesBeforeFailedEdit=storage.saves;
+  repairResponses=[plainReply,{changes:{competitors:[{index:99,kind:"替代方式"}]}}];
+  const failedEdit=await POST(revisionRequest("修改竞品表格中的类别"));
+  assert.equal(failedEdit.status,502);
+  assert.match((await failedEdit.json()).error,/竞品修改未完成.*原竞品记录和来源未修改/u);
+  assert.deepEqual(storage.project,beforeFailedEdit);
+  assert.equal(storage.saves,savesBeforeFailedEdit);
+  assert.equal(tavilyCalls,0);
+
+  repairResponses=[{changes:{title:"修订后的竞品比较",limitations:"旧网页需要回查",nextStep:"核对官网定价"}}];
+  assert.equal((await POST(revisionRequest("修改表格标题和下一步"))).status,200);
+  assert.equal(storage.project.state.pending.artifact.title,"修订后的竞品比较");
+  assert.equal(storage.project.state.pending.artifact.nextStep,"核对官网定价");
+  assert.deepEqual(storage.project.state.pending.artifact.competition,storage.project.state.artifacts.at(-1).competition);
+  assert.equal((await acceptCompetition(true)).status,200);
+
+  // Requests for fresh facts still search; ordinary wording edits do not.
+  repairResponses=[modelOutput];
+  assert.equal((await POST(request({webSearch:false,section:"competitors",message:"联网更新竞品的最新价格"}))).status,200);
+  assert.equal(tavilyCalls,1);
+  assert.equal(storage.project.state.pending.artifact.competition.webSearch.results.length,2);
+  assert.equal((await acceptCompetition(false)).status,200);
+  repairResponses=[{changes:{competitors:[{index:1,price:"待核实"}]}}];
+  assert.equal((await POST(revisionRequest("不要联网，修改竞品最新价格为待核实"))).status,200);
+  assert.equal(tavilyCalls,1);
+  assert.equal((await acceptCompetition(false)).status,200);
+
   const networkMock=globalThis.fetch;
   const originalTimeout=AbortSignal.timeout;
   try {

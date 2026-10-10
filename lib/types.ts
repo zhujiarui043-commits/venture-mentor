@@ -62,7 +62,7 @@ export const canvasNames = ["客户细分","价值主张","渠道通路","客户
 export type CanvasModule = { name: typeof canvasNames[number]; content: string; sourceRefs: string[]; hypothesisRefs: string[]; status: "已记录" | "初步设想" | "待验证" | "未知"; limitations: string; nextStep: string };
 export type CanvasData = { modules: CanvasModule[]; conflicts: string[]; changes?: { name: string; previous: string; current: string }[] };
 export type CompetitorCitation = { field: "audience" | "task" | "feature" | "price" | "limitation"; sourceId: string; quote: string; url?: string; sourceDate?: string; retrievedAt?: string };
-export type Competitor = { name: string; kind: string; audience: string; task: string; feature: string; price: string; limitation: string; sourceQuote: string; sourceId: string; sourceDate: string; verification: "用户材料待核" | "网页资料待核" | "待核实"; sourceUrl?: string; sourceRetrievedAt?: string; citations?: CompetitorCitation[] };
+export type Competitor = { name: string; kind: string; audience: string; task: string; feature: string; price: string; limitation: string; sourceQuote: string; sourceId: string; sourceDate: string; verification: "用户材料待核" | "网页资料待核" | "待核实"; sourceUrl?: string; sourceRetrievedAt?: string; citations?: CompetitorCitation[]; unverifiedFields?: CompetitorCitation["field"][] };
 export type CompetitionData = { scope: string; competitors: Competitor[]; gap: string; counterExplanation: string; unknowns: string[]; webSearch?: WebSearchSnapshot };
 export type Artifact = {
   id: string; section: Section; title: string; content: string; sources: Source[];
