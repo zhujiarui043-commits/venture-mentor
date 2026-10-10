@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { Download, LoaderCircle } from "lucide-react";
-import type { Artifact } from "@/lib/types";
+import { analysisRecordTitle, type Artifact } from "@/lib/types";
 
-export function WordExportButton({artifact}: {artifact: Artifact}) {
+export function WordExportButton({artifact, pending = false}: {artifact: Artifact; pending?: boolean}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function download() {
@@ -12,7 +12,7 @@ export function WordExportButton({artifact}: {artifact: Artifact}) {
     setBusy(true); setError("");
     try {
       const {createInterviewWord, interviewWordFilename} = await import("@/lib/interview-word");
-      const bytes = createInterviewWord(artifact);
+      const bytes = createInterviewWord(artifact, pending);
       const url = URL.createObjectURL(new Blob([new Uint8Array(bytes).buffer], {type:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}));
       const link = document.createElement("a");
       link.href = url; link.download = interviewWordFilename(artifact);
@@ -23,7 +23,7 @@ export function WordExportButton({artifact}: {artifact: Artifact}) {
     } finally { setBusy(false); }
   }
   return <div className="word-export">
-    <button type="button" className="word-export-button" disabled={busy} onClick={() => void download()} aria-label={`将“${artifact.title}”导出为 Word`}>
+    <button type="button" className="word-export-button" disabled={busy} onClick={() => void download()} aria-label={`将“${analysisRecordTitle(artifact)}”导出为 Word`}>
       {busy ? <LoaderCircle size={16} className="spin"/> : <Download size={16}/>} {busy ? "正在生成…" : "导出 Word"}
     </button>
     {error && <p className="error" role="alert">{error}</p>}

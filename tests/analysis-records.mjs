@@ -15,8 +15,8 @@ const require = createRequire(import.meta.url);
 const temp = await mkdtemp(join(tmpdir(), "analysis-records-"));
 let preview, browser, uiDir;
 try {
-  for (const name of ["interview-word", "source-links", "competition-view", "analysis-record", "word-export-button"]) {
-    const path = name === "interview-word" ? `lib/${name}.ts` : `components/${name}.tsx`;
+  for (const name of ["types", "interview-word", "source-links", "competition-view", "analysis-record", "word-export-button"]) {
+    const path = ["types", "interview-word"].includes(name) ? `lib/${name}.ts` : `components/${name}.tsx`;
     let code = ts.transpileModule(await readFile(join(root, path), "utf8"), {compilerOptions:{module:ts.ModuleKind.ESNext, target:ts.ScriptTarget.ES2022, jsx:ts.JsxEmit.ReactJSX}}).outputText
       .replace(/(?:@\/components\/|@\/lib\/|\.\/)([a-z-]+)(?=")/gu, "./$1.mjs");
     for (const dependency of ["react/jsx-runtime", "react", "fflate", "lucide-react"]) code = code.replaceAll(`from "${dependency}"`, `from ${JSON.stringify(pathToFileURL(require.resolve(dependency)).href)}`);
@@ -46,6 +46,9 @@ try {
   const filename = interviewWordFilename({...artifact, title:'../CON: A\\B<>"|?* ' + "字".repeat(150)});
   assert.ok(filename.endsWith("-V3.docx") && !/[<>:"/\\|?*]/u.test(filename) && filename.length < 95);
   assert.equal(interviewWordFilename({...artifact, title:"   "}), "访谈提纲-未命名-V3.docx");
+  assert.equal(interviewWordFilename({...artifact,title:"M05 · 校园访谈提纲"}),"访谈提纲-校园访谈提纲-V3.docx");
+  const draftWord=(await mammoth.extractRawText({buffer:Buffer.from(createInterviewWord({...artifact,title:"M07 · 校园访谈提纲"},true))})).value;
+  assert.ok(draftWord.includes("待确认提纲") && !draftWord.includes("M07 · 校园访谈提纲"));
   const quotes = {...artifact, interview:{sourceId:"M01", quotes:[{quote:"我出门前总是犹豫很久。", direction:"背景", sourceId:"M01", hypothesisId:"H01"}], limitations:"只访谈了一人"}};
   assert.match((await mammoth.extractRawText({buffer:Buffer.from(createInterviewWord(quotes))})).value, /来源 M01[\s\S]*我出门前总是犹豫很久。/u);
 
@@ -142,8 +145,8 @@ try {
     await studioPage.getByRole("button",{name:"调研验证",exact:true}).click();
     await studioPage.getByRole("heading",{name:"分析记录",exact:true}).waitFor();
     const materialSummaries=await studioPage.locator(".material-card>summary").allTextContents();
-    assert.ok(materialSummaries[0].startsWith("材料 M01 · 第一份访谈.docx"));
-    assert.ok(materialSummaries[1].startsWith("材料 M02 · 补充访谈.docx"));
+    assert.ok(materialSummaries[0].startsWith("M01 · 第一份访谈.docx"));
+    assert.ok(materialSummaries[1].startsWith("M02 · 补充访谈.docx"));
     const records=studioPage.locator(".analysis-record");
     assert.equal(await records.count(),2);
     assert.deepEqual(await records.evaluateAll(nodes=>nodes.map(node=>node.open)),[false,false]);
@@ -165,6 +168,66 @@ try {
     await studioPage.screenshot({path:join(screenshots,"research-workspace.png"),fullPage:true});
     assert.deepEqual(studioErrors,[]);
     await studioPage.close();
+
+    // A long, restored pending suggestion must never lock chat or bury its controls.
+    const pendingPage=await browser.newPage({viewport:{width:1440,height:720},acceptDownloads:true});
+    const pendingErrors=[];pendingPage.on("pageerror",error=>pendingErrors.push(error.message));
+    const pendingContent=revisedContent+"\n待确认的最新追问：为什么选择这种方式？";
+    let pendingState={...studioState,messages:Array.from({length:12},(_,i)=>({role:i%2?"assistant":"user",content:"历史讨论。".repeat(80),at:"2026-10-10"})),pending:{id:"restored-outline",fields:{audience:"大学生"},fieldRemovals:[],evidence:[],hypothesis:null,createdAt:"2026-10-10",reply:"请确认提纲",artifact:{...studioState.artifacts[1],title:"M07 · 新版校园访谈提纲",content:pendingContent}}};
+    let pendingRequests=0,conflictOnce=true;
+    await pendingPage.route("**/api/project",route=>route.fulfill({json:{state:pendingState,revision:4}}));
+    await pendingPage.route("**/api/agent",route=>{
+      pendingRequests++;
+      const body=route.request().postDataJSON();assert.equal(body.webSearch,false);
+      pendingState={...pendingState,messages:[...pendingState.messages,{role:"user",content:body.message,at:"2026-10-10"},{role:"assistant",content:pendingRequests===1?"用来了解实际经历。":"已更新追问。",at:"2026-10-10"}]};
+      if(pendingRequests===2)pendingState={...pendingState,pending:{...pendingState.pending,id:"revised-draft",artifact:{...pendingState.pending.artifact,content:pendingContent+"\n本轮修改：请回忆具体选择过程。"}}};
+      return route.fulfill({json:{state:pendingState,revision:4+pendingRequests}});
+    });
+    await pendingPage.route("**/api/confirm",route=>{
+      if(conflictOnce){conflictOnce=false;pendingState={...pendingState,pending:{...pendingState.pending,id:"other-tab-draft"}};return route.fulfill({status:409,json:{error:"待确认内容已更新，请刷新"}})}
+      assert.equal(route.request().postDataJSON().proposalId,"other-tab-draft");
+      pendingState={...pendingState,artifacts:[...pendingState.artifacts,{...pendingState.pending.artifact,id:"confirmed-outline",recordId:"A03",title:"新版校园访谈提纲",version:3,createdAt:"2026-10-10"}],pending:null};
+      return route.fulfill({json:{state:pendingState,revision:8}});
+    });
+    await pendingPage.goto(`http://127.0.0.1:${port}/studio.html`);
+    const pendingToolbar=pendingPage.getByRole("region",{name:"待确认建议",exact:true});
+    const pendingInput=pendingPage.getByPlaceholder("描述想法、提出问题或说明要分析什么…");
+    await pendingToolbar.waitFor();
+    assert.ok(await pendingInput.isEnabled());
+    assert.equal(await pendingPage.locator(".pending-record").count(),1);
+    assert.equal(await pendingPage.locator(".pending-record h3").textContent(),"新版校园访谈提纲");
+    assert.equal(await pendingPage.locator(".pending-record .analysis-record").evaluate(node=>node.open),false);
+    await pendingPage.locator(".pending-record summary").first().click();
+    assert.ok((await pendingPage.locator(".pending-record .artifact-content").textContent()).includes("待确认的最新追问"));
+    const draftDownloadPromise=pendingPage.waitForEvent("download");
+    await pendingPage.locator(".pending-record .word-export-button").click();
+    const draftDownload=await draftDownloadPromise;
+    const draftStream=await draftDownload.createReadStream(),draftChunks=[];for await(const chunk of draftStream)draftChunks.push(chunk);
+    assert.ok((await mammoth.extractRawText({buffer:Buffer.concat(draftChunks)})).value.includes("待确认提纲"));
+    await pendingToolbar.getByRole("button",{name:"修改建议",exact:true}).click();
+    assert.ok(await pendingInput.evaluate(node=>node===document.activeElement));
+    await pendingInput.fill("为什么要问这个问题？");await pendingPage.getByRole("button",{name:"发送",exact:true}).click();
+    await pendingPage.waitForFunction(()=>document.querySelector(".message.assistant:last-of-type")?.textContent?.includes("用来了解实际经历") || [...document.querySelectorAll(".message.assistant")].some(node=>node.textContent.includes("用来了解实际经历")));
+    assert.equal(pendingState.pending.id,"restored-outline");assert.ok(await pendingInput.isEnabled());
+    await pendingInput.fill("修改第三个问题，增加具体过程追问");await pendingPage.getByRole("button",{name:"发送",exact:true}).click();
+    await pendingPage.waitForFunction(()=>document.querySelector(".pending-record .artifact-content")?.textContent?.includes("本轮修改"));
+    await pendingPage.setViewportSize({width:390,height:844});
+    for(const button of await pendingToolbar.getByRole("button").all()) {
+      const box=await button.boundingBox();assert.ok(box&&box.y>=0&&box.y+box.height<=844&&box.x>=0&&box.x+box.width<=390);
+    }
+    assert.ok(await pendingInput.isEnabled());
+    await pendingPage.screenshot({path:join(screenshots,"pending-chat-mobile.png"),fullPage:true});
+    await pendingPage.setViewportSize({width:1440,height:720});
+    await pendingToolbar.getByRole("button",{name:"确认保存",exact:true}).click();
+    await pendingPage.getByRole("alert").filter({hasText:"待确认内容已更新"}).waitFor();
+    assert.ok(await pendingInput.isEnabled());
+    await pendingToolbar.getByRole("button",{name:"确认保存",exact:true}).click();
+    await pendingToolbar.waitFor({state:"detached"});
+    assert.equal(await pendingPage.locator(".pending-record").count(),0);
+    assert.equal(await pendingPage.locator(".analysis-record").count(),3);
+    assert.equal(await pendingPage.locator(".analysis-record").first().locator(".artifact-top span").textContent(),"分析记录 A03 · V3");
+    assert.ok((await pendingPage.locator(".analysis-record").first().locator(".artifact-content").textContent()).includes("本轮修改"));
+    assert.deepEqual(pendingErrors,[]);await pendingPage.close();
 
     const competitionPage=await browser.newPage({viewport:{width:1440,height:1000}});
     const competitionErrors=[];competitionPage.on("pageerror",error=>competitionErrors.push(error.message));

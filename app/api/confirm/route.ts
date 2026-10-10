@@ -2,7 +2,7 @@ import { getProject, ProjectConflictError, saveProject } from "@/lib/store";
 import { currentTester, projectIdFor, unauthorized } from "@/lib/auth";
 import { attachEvidenceToVersion, isSubstantiveRevision } from "@/lib/hypothesis";
 import { proposalChanges } from "@/lib/proposal-changes";
-import { numberAnalysisRecords } from "@/lib/types";
+import { analysisRecordTitle, nextArtifactVersion, numberAnalysisRecords } from "@/lib/types";
 
 export async function POST(request: Request) {
   try {
@@ -68,7 +68,9 @@ export async function POST(request: Request) {
         if(h&&material)attachEvidenceToVersion(h,item,material,confirmedAt,revisedVersions.get(h.id));
       }
       if(p.artifact){
-        const old=state.artifacts.filter(a=>a.section===p.artifact?.section && (p.artifact?.diagnosis||p.artifact?.canvas||p.artifact?.competition?true:p.artifact?.mvp?!!a.mvp:a.title===p.artifact?.title));
+        p.artifact.title = analysisRecordTitle(p.artifact);
+        const version = nextArtifactVersion(state.artifacts, p.artifact);
+        const old=state.artifacts.filter(a=>a.section===p.artifact?.section && (p.artifact?.diagnosis||p.artifact?.canvas||p.artifact?.competition?true:p.artifact?.mvp?!!a.mvp:analysisRecordTitle(a)===p.artifact?.title));
         const previous=old.at(-1)?.diagnosis;
         if(p.artifact.diagnosis && previous)p.artifact.diagnosis.changes=p.artifact.diagnosis.dimensions.flatMap(d=>{
           const prior=previous.dimensions.find(x=>x.name===d.name);
@@ -79,7 +81,7 @@ export async function POST(request: Request) {
           const prior=priorCanvas.modules.find(x=>x.name===d.name);
           return prior&&prior.content!==d.content?[{name:d.name,previous:prior.content,current:d.content}]:[];
         });
-        state.artifacts = numberAnalysisRecords([...state.artifacts, {...p.artifact,id:crypto.randomUUID(),version:old.reduce((max,a)=>Math.max(max,a.version),0)+1,createdAt:confirmedAt}]);
+        state.artifacts = numberAnalysisRecords([...state.artifacts, {...p.artifact,id:crypto.randomUUID(),version,createdAt:confirmedAt}]);
       }
     }
     state.pending=null;

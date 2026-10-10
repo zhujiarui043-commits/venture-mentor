@@ -2,10 +2,11 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { projects } from "@/db/schema";
 import { emptyProject, numberAnalysisRecords, type ProjectState } from "./types";
+import { activeProposal } from "./proposal-changes";
 
 function readState(json: string): ProjectState {
   const state = JSON.parse(json) as ProjectState;
-  return {...state, artifacts: numberAnalysisRecords(state.artifacts)};
+  return {...state, artifacts: numberAnalysisRecords(state.artifacts), pending: activeProposal(state)};
 }
 
 export async function getProject(id: string) {

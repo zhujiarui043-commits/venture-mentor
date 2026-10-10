@@ -21,7 +21,7 @@ try {
   const { missingRequiredStructure } = await import(pathToFileURL(join(temp, "structured.mjs")));
   const { isSubstantiveRevision, evidenceVersionTarget, attachEvidenceToVersion } = await import(pathToFileURL(join(temp, "hypothesis.mjs")));
   const { selectRelevantMemory } = await import(pathToFileURL(join(temp, "memory.mjs")));
-  const { proposalChanges, hasProposalChanges } = await import(pathToFileURL(join(temp, "proposal-changes.mjs")));
+  const { proposalChanges, hasProposalChanges, activeProposal, mergePendingProposal } = await import(pathToFileURL(join(temp, "proposal-changes.mjs")));
   const { planConversation, cleanSuggestedQuestions } = await import(pathToFileURL(join(temp, "workflow.mjs")));
   const { selectKnowledge, resolveKnowledgeTask } = await import(pathToFileURL(join(temp, "knowledge.mjs")));
 
@@ -52,6 +52,18 @@ try {
   assert.equal(outline.recordId,undefined);
   assert.deepEqual(numberAnalysisRecords(numbered),numbered);
   assert.deepEqual(numberAnalysisRecords([...numbered,{...outline,id:"third-uuid"}]).map(item=>item.recordId),["A01","A02","A03"]);
+  assert.equal(numberAnalysisRecords([{...outline,title:"M05 · 校园访谈提纲"}])[0].title,"校园访谈提纲");
+  assert.equal(numberAnalysisRecords([{...outline,title:"材料 M07：校园访谈提纲"}])[0].title,"校园访谈提纲");
+  const draft={id:"pending-outline",fields:{audience:"大学生"},fieldRemovals:[],evidence:[],hypothesis:null,reply:"提纲已生成",createdAt:"2026-10-10",artifact:{...outline,title:"M07 · 校园访谈提纲"}};
+  const withPending={...emptyProject("pending"),fields:{audience:"年轻人"},pending:draft};
+  assert.equal(activeProposal(withPending).artifact.title,"校园访谈提纲");
+  assert.equal(planConversation("overview","修改第三个问题","",false,withPending).createArtifact,true);
+  const noChange={...draft,id:"answer-only",fields:{},artifact:null};
+  assert.equal(mergePendingProposal(withPending,noChange).id,draft.id);
+  const reverted=mergePendingProposal(withPending,{...noChange,fields:{audience:"年轻人"}});
+  assert.deepEqual(reverted.fields,{});
+  assert.equal(reverted.artifact.title,"校园访谈提纲");
+  assert.equal(activeProposal({...withPending,pending:{...draft,fields:{audience:"年轻人"},artifact:null}}),null);
   const interviewState={...emptyProject("interview"),artifacts:numbered,materials:[{id:"M07",content:"真实访谈原文。",at:"2026-10-10"}]};
   const uploaded=prepareMaterials(interviewState,[{name:"补充访谈.docx",text:"新访谈原文。"}],"访谈记录");
   assert.equal(uploaded[0].id,"M08");

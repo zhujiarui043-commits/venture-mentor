@@ -5,7 +5,7 @@ import { resolveKnowledgeTask } from "@/lib/knowledge";
 import { summarizeCsv, summarizeFunnel } from "@/lib/data";
 import { env } from "cloudflare:workers";
 import { buildCompetitorQuery, CompetitorSearchError, searchCompetitors } from "@/lib/competitor-search";
-import { hasProposalChanges } from "@/lib/proposal-changes";
+import { activeProposal, mergePendingProposal } from "@/lib/proposal-changes";
 import { planConversation } from "@/lib/workflow";
 import { bindMaterialSources, materialContext, MaterialsInputError, prepareMaterials, validateMaterials } from "@/lib/materials";
 import { ModelRequestError } from "@/lib/agent-search";
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     if (body.projectId !== projectIdFor(tester)) return Response.json({error:"无权访问该项目"},{status:403});
     const project = await getProject(body.projectId);
     if (!project) return Response.json({error:"项目不存在"},{status:404});
-    if (project.state.pending) return Response.json({error:"请先确认或放弃上一条修改建议"},{status:409});
+    project.state.pending = activeProposal(project.state);
     const message = body.message.slice(0,6000);
     const referenceText=inputs.map(input=>input.text).join("\n\n");
     const messageId=crypto.randomUUID();
@@ -65,7 +65,7 @@ export async function POST(request: Request) {
       bindMaterialSources(proposal,materials);
     }
     project.state.messages.push({id:messageId,role:"user",content:message,at:new Date().toISOString()},{id:crypto.randomUUID(),role:"assistant",content:proposal.reply,at:new Date().toISOString(),task:{label:plan.label,section},suggestedQuestions:proposal.suggestedQuestions,...(proposal.webSearch?{webSearch:proposal.webSearch,replyCitations:proposal.replyCitations}:{}),...(proposal.searchWarning?{searchWarning:proposal.searchWarning}:{})});
-    project.state.pending = hasProposalChanges(proposal) ? proposal : null;
+    project.state.pending = mergePendingProposal(project.state, proposal);
     return Response.json(await saveProject(project.state,project.revision));
   } catch(error) { return Response.json({error:error instanceof Error?error.message:"请求失败"},{status:error instanceof MaterialsInputError||error instanceof ModelRequestError?error.status:error instanceof ProjectConflictError?409:error instanceof CompetitorSearchError?error.status:error instanceof SyntaxError?400:500}); }
 }

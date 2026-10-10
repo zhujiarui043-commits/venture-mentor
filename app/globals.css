@@ -90,10 +90,16 @@
 .mentor-resize-handle:hover::before,.mentor-resize-handle:focus-visible::before,.chat-resizing .mentor-resize-handle::before,.mentor-resize-handle:hover .mentor-resize-grip,.mentor-resize-handle:focus-visible .mentor-resize-grip,.chat-resizing .mentor-resize-grip{opacity:1}
 .chat-resizing,.chat-resizing *{cursor:col-resize!important;user-select:none!important}
 .mentor-panel .conversation{min-height:0;overflow-wrap:anywhere}
+.pending-review{flex:none;padding:12px 18px;border-top:1px solid var(--border);background:var(--accent);min-width:0}
+.pending-review>strong{display:block;font-size:13px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.pending-review>small{display:block;margin-top:4px;font-size:11px;color:var(--muted-foreground)}
+.pending-review .proposal-actions{margin-top:8px;gap:6px}
+.pending-record{border-color:var(--ring)}
+.mentor-panel .composer{max-height:45dvh;overflow:auto}
 .body-grid.chat-fullscreen>.main-panel{display:none}
 .mentor-panel.mentor-panel-fullscreen{position:fixed;inset:0;z-index:60;width:100%;height:100vh;height:100dvh;max-height:none;border-left:0;box-shadow:none}
 .mentor-panel-fullscreen .mentor-header{padding:15px clamp(18px,4vw,48px)}
-.mentor-panel-fullscreen .conversation,.mentor-panel-fullscreen .composer{width:100%;max-width:1040px;margin-left:auto;margin-right:auto}
+.mentor-panel-fullscreen .conversation,.mentor-panel-fullscreen .composer,.mentor-panel-fullscreen .pending-review{width:100%;max-width:1040px;margin-left:auto;margin-right:auto}
 .mentor-panel-fullscreen .composer{max-height:55dvh;overflow:auto}
 .mentor-panel-fullscreen .fullscreen-chat-close{display:inline-flex}
 @media(max-width:780px){.mentor-resize-handle{display:none}.mentor-panel-actions .mobile-chat-close{display:inline-flex;margin-left:0}.mentor-panel{position:fixed}.body-grid.with-chat{display:block}}

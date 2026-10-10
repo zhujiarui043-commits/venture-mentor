@@ -7,7 +7,7 @@ export type ConversationPlan = {
   createArtifact: boolean;
 };
 
-const revision = /修改|改写|修订|调整|完善|优化|重写|迭代/u;
+const revision = /修改|改写|修订|调整|完善|优化|重写|迭代|改成|改为|替换|添加|增加|删除|删掉|补充/u;
 const competitorEdit = /修改|改写|修订|调整|完善|优化|重写|更新|删除|删掉|移除|去掉|改成|改为|替换|补充|添加|增加|只保留|仅保留/u;
 const action = /生成|整理|更新|制作|制定|设计|编写|拟定|输出|拆出|分析|评估|诊断|修改|改写|修订|调整|完善|优化|重写|迭代|删除|删掉|移除|去掉|改成|改为|替换|补充|添加|增加|只保留|仅保留|做(?:一份|一张|一个)/u;
 const targets: [Section, RegExp][] = [
@@ -30,19 +30,20 @@ function actionableClauses(message: string) {
 }
 
 // Route explicit tasks; ambiguous requests keep their current conversational context.
-export function planConversation(section: Section, message: string, referenceText = "", manualSearch = false, state?: Pick<ProjectState, "artifacts" | "messages">): ConversationPlan {
+export function planConversation(section: Section, message: string, referenceText = "", manualSearch = false, state?: Pick<ProjectState, "artifacts" | "messages"> & Partial<Pick<ProjectState, "pending">>): ConversationPlan {
   if (manualSearch) return { section: "competitors", kind: "webResearch", label: "联网竞品研究", createArtifact: true };
   const clauses = actionableClauses(message);
   const target = targets.find(([, pattern]) => clauses.some(clause => pattern.test(clause)))?.[0];
   if (target) return { section: target, kind: "artifact", label: `${sectionLabels[target]}任务`, createArtifact: true };
-  const lastCompetition = state?.artifacts.filter(artifact => artifact.section === "competitors" && artifact.competition).at(-1)?.competition;
-  if (lastCompetition && (section === "competitors" || state?.messages.at(-1)?.task?.section === "competitors")
+  const pendingArtifact = state?.pending?.artifact;
+  const lastCompetition = pendingArtifact?.competition || state?.artifacts.filter(artifact => artifact.section === "competitors" && artifact.competition).at(-1)?.competition;
+  if (lastCompetition && (section === "competitors" || pendingArtifact?.section === "competitors" || state?.messages.at(-1)?.task?.section === "competitors")
     && clauses.some(clause => competitorEdit.test(clause) && (/类别|分类|功能|价格|对照|表格|范围|差异|缺口|反向|待核|对象|标题|限制|下一步|这份|这版/u.test(clause) || lastCompetition.competitors.some(candidate => clause.includes(candidate.name)))))
     return {section:"competitors",kind:"artifact",label:"竞品分析修订",createArtifact:true};
-  const lastResearch = state?.artifacts.filter(artifact => artifact.section === "research").at(-1);
+  const lastResearch = pendingArtifact?.section === "research" ? pendingArtifact : state?.artifacts.filter(artifact => artifact.section === "research").at(-1);
   const continuingInterview = lastResearch && !lastResearch.mvp && !lastResearch.survey && !lastResearch.funnel
     && /访谈|采访|提纲|招募/u.test(lastResearch.title + "\n" + lastResearch.content)
-    && (section === "research" || state?.messages.at(-1)?.task?.section === "research");
+    && (section === "research" || pendingArtifact?.section === "research" || state?.messages.at(-1)?.task?.section === "research");
   if (continuingInterview && clauses.some(clause => revision.test(clause) && /提问|问题|这份|这版|版本|一版/u.test(clause)))
     return {section:"research", kind:"artifact", label:"访谈提纲修订", createArtifact:true};
   if (referenceText) return { section, kind: "materialAnalysis", label: "材料解读", createArtifact: clauses.length > 0 };

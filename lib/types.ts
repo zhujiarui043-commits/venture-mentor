@@ -116,6 +116,26 @@ export function emptyProject(id: string): ProjectState {
   return { id, title: "未命名项目", rawIdea: "", fields: {}, fieldStatuses: {}, fieldMeta: {}, hypotheses: [], artifacts: [], messages: [], materials: [], pending: null, updatedAt: new Date().toISOString() };
 }
 
+export function analysisRecordTitle(artifact: Pick<Artifact, "section" | "title" | "content">): string {
+  if (artifact.section !== "research" || !/访谈|采访|提纲|招募/u.test(artifact.title + "\n" + artifact.content)) return artifact.title;
+  const prefix = /^\s*(?:[【[(（]\s*)?(?:材料\s*)?M\d+\s*(?:[】\])）]\s*)?[·:：、.．_…—–-]*\s*/iu;
+  return prefix.test(artifact.title) ? artifact.title.replace(prefix, "").trim() || "访谈提纲" : artifact.title;
+}
+
+export function nextArtifactVersion(artifacts: Artifact[], artifact: Proposal["artifact"]): number {
+  if (!artifact) return 1;
+  const title = analysisRecordTitle(artifact);
+  const previous = artifacts.filter(a => a.section === artifact.section &&
+    (artifact.diagnosis || artifact.canvas || artifact.competition ? true : artifact.mvp ? !!a.mvp : analysisRecordTitle(a) === title));
+  return previous.reduce((max, a) => Math.max(max, a.version), 0) + 1;
+}
+
+export function pendingAnalysisRecord(state: ProjectState, proposal = state.pending): Artifact | null {
+  const artifact = proposal?.artifact;
+  return artifact && proposal ? {...artifact, title: analysisRecordTitle(artifact), id: `pending-${proposal.id}`,
+    recordId: undefined, version: nextArtifactVersion(state.artifacts, artifact), createdAt: proposal.createdAt} : null;
+}
+
 // Analysis numbers have their own sequence; UUIDs and material references stay intact.
 export function numberAnalysisRecords(artifacts: Artifact[]): Artifact[] {
   const recordNumber = (id?: string) => /^A\d+$/iu.test(id || "") ? Number(id!.slice(1)) : 0;
@@ -129,6 +149,7 @@ export function numberAnalysisRecords(artifacts: Artifact[]): Artifact[] {
     const next = Number.isSafeInteger(number) && number > 0 && !assigned.has(number) ? number : ++last;
     assigned.add(next);
     const recordId = `A${String(next).padStart(2, "0")}`;
-    return artifact.recordId === recordId ? artifact : {...artifact, recordId};
+    const title = analysisRecordTitle(artifact);
+    return artifact.recordId === recordId && artifact.title === title ? artifact : {...artifact, recordId, title};
   });
 }

@@ -121,8 +121,9 @@ try {
   assert.equal((await POST(request())).status,503);
   assert.equal(tavilyCalls,0);env.DEEPSEEK_API_KEY=missingModelKey;
   storage.project.state.pending={id:"pending"};
-  assert.equal((await POST(request())).status,409);
+  assert.equal((await POST(request({webSearch:false,section:"overview",message:"什么是访谈？"}))).status,200);
   assert.equal(tavilyCalls,0);
+  assert.equal(storage.project.state.pending,null);
 
   reset();
   const response=await POST(request({searchQuery:"Dovetail pricing",referenceText:"仅供模型分析的用户材料"}));
@@ -212,6 +213,17 @@ try {
   const toolCall=(id="call_search",args=JSON.stringify({query:"Dovetail interview analysis tools"}))=>({id,type:"function",function:{name:"search_web",arguments:args}});
   const toolChoice=calls=>({finish_reason:"tool_calls",message:{content:null,tool_calls:calls}});
   const plainReply={reply:"这是一般原理的解释。",artifact:null,fields:{},evidence:[],hypothesis:null};
+  reset();
+  storage.project.state.pending={...plainReply,id:"draft-field",fields:{audience:"年轻上班族"},createdAt:"2026-10-10"};
+  const fieldDraft=structuredClone(storage.project.state.pending);
+  repairResponses=[plainReply];
+  assert.equal((await POST(request({webSearch:false,section:"overview",message:"什么是探索性访谈？"}))).status,200);
+  assert.deepEqual(storage.project.state.pending,{...fieldDraft,fieldStatuses:{},fieldMeta:{},fieldRemovals:[],projectTitle:undefined});
+  assert.deepEqual(storage.project.state.fields,state.fields);
+  repairResponses=[{...plainReply,fields:{audience:state.fields.audience}}];
+  assert.equal((await POST(request({webSearch:false,section:"overview",message:"目标用户改成大学生"}))).status,200);
+  assert.equal(storage.project.state.pending,null);
+  assert.deepEqual(storage.project.state.fields,state.fields);
   const webReply={...plainReply,reply:"Dovetail 提供访谈分析功能。[W01]",replyCitations:[{sourceId:"W01",quote:"analyze interviews",url:"https://forged.example"},{sourceId:"W99",quote:"虚构引用"}]};
   for(const question of ["现在有哪些相关技术？","有没有类似产品？"]){
     reset();toolChoices=[toolChoice([toolCall()])];repairResponses=[webReply];
@@ -365,11 +377,31 @@ try {
   assert.equal(storage.project.state.pending.artifact.section,"research");
   assert.equal(storage.project.state.artifacts.length,2);
   const acceptOutline=()=>confirm(new Request("https://example.com/api/confirm",{method:"POST",headers:{cookie},body:JSON.stringify({projectId:state.id,proposalId:storage.project.state.pending.id,accept:true})}));
+  const firstDraft=structuredClone(storage.project.state.pending), confirmedBeforeChat=structuredClone(storage.project.state.artifacts);
+  const beforeFailedReply=structuredClone(storage.project),savesBeforeFailedReply=storage.saves;
+  toolChoices=[{finish_reason:"stop",message:{content:"not JSON"}},{finish_reason:"stop",message:{content:"still not JSON"}}];
+  assert.equal((await POST(request({webSearch:false,section:"research",message:"为什么要问这个问题？"}))).status,500);
+  assert.deepEqual(storage.project,beforeFailedReply);assert.equal(storage.saves,savesBeforeFailedReply);
+  repairResponses=[{...plainReply,reply:"这道题用来了解受访者的实际经历。"}];
+  assert.equal((await POST(request({webSearch:false,section:"research",message:"为什么要问这个问题？"}))).status,200);
+  assert.deepEqual(storage.project.state.pending,firstDraft);
+  assert.deepEqual(storage.project.state.artifacts,confirmedBeforeChat);
+  assert.ok(calls.at(-1).payload.messages[0].content.includes("待确认建议不阻止正常对话"));
+  assert.ok(calls.at(-1).payload.messages[0].content.includes("第三题：当时尝试了哪些解决方式？"));
+  repairResponses=[{...plainReply,artifact:{...revised,title:"M05 · 校园访谈提纲",content:revised.content+"\n未确认时追加追问：为什么选择这种方式？"}}];
+  assert.equal((await POST(request({webSearch:false,section:"overview",message:"修改第三个问题，增加选择原因的追问"}))).status,200);
+  assert.equal(storage.project.state.pending.artifact.title,"校园访谈提纲");
+  assert.ok(storage.project.state.pending.artifact.content.includes("未确认时追加追问"));
+  assert.ok(calls.at(-1).payload.messages[0].content.includes('"currentInterviewOutline"'));
+  assert.notEqual(storage.project.state.pending.id,firstDraft.id);
+  assert.equal((await confirm(new Request("https://example.com/api/confirm",{method:"POST",headers:{cookie},body:JSON.stringify({projectId:state.id,proposalId:firstDraft.id,accept:true})}))).status,409);
+  assert.deepEqual(storage.project.state.artifacts,confirmedBeforeChat);
   assert.equal((await acceptOutline()).status,200);
   assert.deepEqual(storage.project.state.artifacts.map(item=>item.recordId),["A01","A02","A03"]);
   assert.equal(storage.project.state.artifacts.at(-1).version,2);
   assert.equal(storage.project.state.artifacts[0].id,"old-outline-uuid");
   assert.equal(storage.project.state.artifacts[0].content,outline.content);
+  assert.ok(storage.project.state.artifacts.at(-1).content.includes("未确认时追加追问"));
   assert.deepEqual(storage.project.state.materials.map(item=>item.id),["M07"]);
 
   repairResponses=[{...plainReply,artifact:{...revised,content:revised.content+"\n追加追问：还有其他选择吗？"}}];
