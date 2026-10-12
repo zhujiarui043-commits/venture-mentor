@@ -26,11 +26,12 @@ Next.js、React、TypeScript、Vite/Vinext、Cloudflare Workers、Cloudflare D1�
 pnpm install --frozen-lockfile
 cp .dev.vars.example .dev.vars
 pnpm run build
+pnpm exec wrangler d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_motionless_firebird.sql
 pnpm run db:migrate:local
 pnpm run dev
 ```
 
-访问终端输出的本地地址。`.dev.vars` 只保存在本地，用于配置 `DEEPSEEK_API_KEY`、`TAVILY_API_KEY`、`SESSION_SECRET` 和测试码等变量，绝不要提交到 Git。
+以上复制配置和创建基础表步骤用于首次安装；已有 `.dev.vars` 和数据库时不重复执行，先填写配置再启动。访问终端输出的本地地址。`.dev.vars` 只保存在本地，用于配置 `DEEPSEEK_API_KEY`、`TAVILY_API_KEY`、`SESSION_SECRET` 和测试码等变量，绝不要提交到 Git。
 
 Mac 的完整安装和部署说明见 [docs/MACOS.md](docs/MACOS.md)，账号使用说明见 [docs/邮箱与测试码登录.md](docs/邮箱与测试码登录.md)。
 
@@ -50,6 +51,8 @@ pnpm run db:migrate:local    # 本地数据库迁移
 ```
 
 完整测试脚本见 [`package.json`](package.json)。
+
+目录用途及保留规则见 [文件组织说明](docs/PROJECT_STRUCTURE.md)。
 
 ## 部署
 

@@ -19,11 +19,11 @@ pnpm 应显示 `11.25.0`。版本以 `package.json` 的 `packageManager` 为准�
 在终端进入解压后的源码目录，然后安装依赖：
 
 ```bash
-cd "$HOME/Downloads/启点-Mac迁移包/local/venture-mentor-team-test"
+cd /Users/jerry/Documents/启点/local/venture-mentor
 pnpm install --frozen-lockfile
 ```
 
-按实际解压位置调整 `cd` 路径。Mac 需要重新安装自己的 `workerd`、`sharp` 等原生依赖，不能沿用 Windows 的 `node_modules`。保留现有锁文件与 `pnpm-workspace.yaml`。这里直接使用 `pnpm install`；`install:ci` 和部分 `scripts/*.sh` 是 Linux 托管环境的安装辅助脚本，依赖 GNU 工具，不适用于 Mac 的常规安装。
+按实际项目位置调整 `cd` 路径。Mac 需要重新安装自己的 `workerd`、`sharp` 等原生依赖，不能沿用 Windows 的 `node_modules`。保留现有锁文件与 `pnpm-workspace.yaml`。这里直接使用 `pnpm install`；`install:ci` 和部分 `scripts/*.sh` 是 Linux 托管环境的安装辅助脚本，依赖 GNU 工具，不适用于 Mac 的常规安装。
 
 ## 本地运行
 
@@ -57,6 +57,7 @@ node -e 'console.log(require("node:crypto").randomBytes(32).toString("hex"))'
 ```bash
 pnpm run build
 pnpm exec wrangler d1 execute venture-mentor-team-test --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_motionless_firebird.sql
+pnpm run db:migrate:local
 pnpm run dev
 ```
 
@@ -92,7 +93,7 @@ pnpm exec wrangler whoami
 bash deploy-and-smoke.sh
 ```
 
-脚本从现有构建或 `config/deployment.json` 读取数据库 ID，依次运行 6 项测试、构建并核对数据库 ID，再部署到已有 Worker，最后检查配置中的公开网址。测试、构建或数据库核对失败时停止。Windows 继续使用原 `deploy-and-smoke.cmd`。
+脚本从现有构建或 `config/deployment.json` 读取数据库 ID，运行功能回归、构建并核对数据库 ID，执行账号表迁移，再部署到已有 Worker，最后检查配置中的公开网址。测试、构建或数据库核对失败时停止。Windows 继续使用原 `deploy-and-smoke.cmd`。
 
 现有 Worker 的 DeepSeek、Tavily、会话及测试码 Secret 继续由 Cloudflare 保存。本次迁移无需重新创建 D1、执行远程建表或重新填写这些 Secret。部署后用原网址和测试码检查导师回复、确认保存与刷新后记录：
 
