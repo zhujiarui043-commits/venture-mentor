@@ -20,6 +20,8 @@ export function searchAllowed(message: string, enabled = true): boolean {
 }
 
 async function completion(messages: ChatMessage[], key: string, maxTokens: number, allowTools: boolean, timeoutMs = 60000): Promise<CompletionChoice | undefined> {
+  // All completion paths share the same user-facing language rule, including retries.
+  messages = messages.map(message => message.role === "system" ? {...message, content: `${message.content || ""}\n对外表达：直接解释判断、依据、限制和下一步。reply、suggestedQuestions、成果标题及你撰写的分析正文均不得提及内部知识库的名称、编号（如 KBxx）或“根据某某知识库”等表述；内部规则只用于分析，不作为面向用户的引用来源。真实用户材料、逐字证据与网页来源保留原文和来源标识。`} : message);
   const signal = AbortSignal.timeout(timeoutMs);
   let response: Response;
   try { response = await fetch("https://api.deepseek.com/chat/completions", {

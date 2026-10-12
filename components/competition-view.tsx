@@ -1,23 +1,32 @@
 import { ChevronRight } from "lucide-react";
 import type { CompetitionData, Competitor, CompetitorCitation } from "@/lib/types";
 import { SourceLink, WebSources } from "./source-links";
+import { selectionKey, type CompetitionRow } from "@/lib/competition-workspace";
+import type { CompetitionSelection } from "@/lib/types";
 
 const labels = {audience:"目标用户", task:"任务", feature:"功能", price:"价格", limitation:"限制"};
 function fieldValue(competitor: Competitor, field: CompetitorCitation["field"]) {
-  return `${competitor[field] || "待核实"}${competitor.unverifiedFields?.includes(field) ? "（用户补充，待核实）" : ""}`;
+  return `${competitor[field] || "待核实"}${competitor.userVerifications?.[field] ? "（用户已核实）" : competitor.unverifiedFields?.includes(field) ? "（用户补充，待核实）" : ""}`;
 }
 
 // The overview is the only comparison table; sources live in the records below.
-export function CompetitionTable({competition}: {competition: CompetitionData}) {
+export function CompetitionTable({competition, rows, onRetentionChange, disabled = false}: {
+  competition: CompetitionData; rows?: CompetitionRow[]; disabled?: boolean;
+  onRetentionChange?: (selection: CompetitionSelection, retained: boolean) => void;
+}) {
   return <section className="structured-result competition-view">
     <h4>竞品与替代方式 · {competition.scope || "范围待确认"}</h4>
+    {onRetentionChange && <p className="competition-selection-note">勾选“保留”后，下次搜索仍会保留该项内容和来源；未勾选项会被新结果替换。已保留 {rows?.filter(row => row.retained).length || 0} 项。</p>}
     {competition.competitors.length ? <div className="comparison-scroll" tabIndex={0} role="region" aria-label="竞品对照表，可横向滚动">
       <table className="competition-table">
         <caption>窄屏可左右滑动。来源和判断依据见下方“分析记录与来源”。</caption>
         <colgroup><col className="competition-object-col"/><col className="competition-users-col"/><col className="competition-features-col"/></colgroup>
         <thead><tr><th scope="col">对象 / 类别</th><th scope="col">用户与任务</th><th scope="col">功能 / 价格</th></tr></thead>
-        <tbody>{competition.competitors.map((c, i) => <tr key={i}>
-          <th scope="row"><strong>{c.name}</strong><small>{c.kind}</small></th>
+        <tbody>{competition.competitors.map((c, i) => <tr key={rows?.[i] ? selectionKey(rows[i]) : i} data-retained={rows?.[i]?.retained || undefined}>
+          <th scope="row"><strong>{c.name}</strong><small>{c.kind}</small>{onRetentionChange && rows?.[i] && <>
+            <label className="competitor-retain"><input type="checkbox" aria-label={`保留 ${c.name}`} checked={rows[i].retained} disabled={disabled} onChange={event => onRetentionChange({artifactId: rows[i].artifactId, competitorIndex: rows[i].competitorIndex}, event.target.checked)}/><span>{rows[i].retained ? "已保留" : "保留"}</span></label>
+            {rows[i].retained && rows[i].recordId && <small>原始来源见 {rows[i].recordId}</small>}
+          </>}</th>
           <td><div>{fieldValue(c,"audience")}</div><div className="comparison-attribute"><span>任务</span>{fieldValue(c,"task")}</div></td>
           <td><div>{fieldValue(c,"feature")}</div><div className="comparison-attribute"><span>价格</span>{fieldValue(c,"price")}</div><div className="comparison-attribute"><span>限制</span>{fieldValue(c,"limitation")}</div></td>
         </tr>)}</tbody>
@@ -38,6 +47,10 @@ export function CompetitionDetails({competition}: {competition: CompetitionData}
         <dl>{(Object.keys(labels) as (keyof typeof labels)[]).map(field => <div key={field}><dt>{labels[field]}</dt><dd>{fieldValue(c,field)}</dd></div>)}</dl>
         <div className="competitor-source">
           <h5>来源与核实状态</h5><p>{c.verification}</p>
+          {c.userVerifications && <div className="claim-citations"><h5>用户核实记录</h5>{(Object.keys(labels) as (keyof typeof labels)[]).map(field => {
+            const verification = c.userVerifications?.[field];
+            return verification ? <blockquote key={field}><b>{labels[field]} · 用户已核实</b>{verification.contextQuote && <p>对应对话：{verification.contextQuote}</p>}<p>{verification.quote}</p><small>记录于 {new Date(verification.confirmedAt).toLocaleString("zh-CN")}</small></blockquote> : null;
+          })}</div>}
           {c.sourceId ? <>
             <SourceLink url={c.sourceUrl}>{c.sourceId} · 查看来源</SourceLink>
             <p>{c.sourceDate ? "发布日期：" + c.sourceDate : "发布日期未提供"}{c.sourceRetrievedAt && <> · 检索于 {new Date(c.sourceRetrievedAt).toLocaleString("zh-CN")}</>}</p>

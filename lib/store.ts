@@ -1,12 +1,12 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { projects } from "@/db/schema";
-import { emptyProject, numberAnalysisRecords, type ProjectState } from "./types";
+import { emptyProject, normalizeProjectNumbers, type ProjectState } from "./types";
 import { activeProposal } from "./proposal-changes";
 
 function readState(json: string): ProjectState {
-  const state = JSON.parse(json) as ProjectState;
-  return {...state, artifacts: numberAnalysisRecords(state.artifacts), pending: activeProposal(state)};
+  const state = normalizeProjectNumbers(JSON.parse(json) as ProjectState);
+  return {...state, pending: activeProposal(state)};
 }
 
 export async function getProject(id: string) {
@@ -21,7 +21,7 @@ export async function getOrCreateProject(id: string) {
   return (await getProject(id))!;
 }
 export async function saveProject(state: ProjectState, revision: number) {
-  state.artifacts = numberAnalysisRecords(state.artifacts);
+  state = normalizeProjectNumbers(state);
   state.updatedAt = new Date().toISOString();
   const updated = await getDb().update(projects).set({
     title: state.title, state: JSON.stringify(state), revision: revision + 1, updatedAt: state.updatedAt,

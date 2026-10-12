@@ -1,5 +1,5 @@
 import { zipSync, strToU8 } from "fflate";
-import { analysisRecordTitle, type Artifact } from "./types";
+import { analysisRecordTitle, artifactResearchModes, sectionLabels, type Artifact } from "./types";
 
 const wordNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const relNs = "http://schemas.openxmlformats.org/package/2006/relationships";
@@ -42,15 +42,25 @@ function bodyParagraphs(content: string) {
   return output.join("");
 }
 
-export function interviewWordFilename(artifact: Pick<Artifact, "title" | "version">) {
-  const title = Array.from(analysisRecordTitle({section:"research",title:artifact.title,content:"访谈提纲"}).replace(/[<>:"/\\|?*\u0000-\u001F]/gu, " ").replace(/\s+/gu, " ").trim()).slice(0, 70).join("").replace(/[. ]+$/gu, "");
-  return `访谈提纲-${title || "未命名"}-V${artifact.version}.docx`;
+export function analysisWordFilename(artifact: Pick<Artifact, "title" | "recordId" | "section" | "content"> & Partial<Artifact>) {
+  const title = Array.from(analysisRecordTitle(artifact).replace(/[<>:"/\\|?*\u0000-\u001F]/gu, " ").replace(/\s+/gu, " ").trim()).slice(0, 70).join("").replace(/[. ]+$/gu, "");
+  const mode = artifact.section === "research" ? artifactResearchModes(artifact as Artifact)[0] : undefined;
+  const prefix = mode === "用户访谈" ? (/提纲|招募|访谈(?:方案|计划)/u.test(title) ? "访谈提纲" : "用户访谈")
+    : mode === "问卷调查" ? "问卷调查" : mode === "MVP 测试" ? "MVP测试"
+      : artifact.section === "research" ? "调研分析" : sectionLabels[artifact.section];
+  const recordId = /^[ACDBORQTU]\d+$/u.test(artifact.recordId || "") ? `-${artifact.recordId}` : "";
+  return `${prefix}-${title || "未命名"}${recordId}.docx`;
+}
+
+// Retain the legacy API for callers that export interview outlines.
+export function interviewWordFilename(artifact: Pick<Artifact, "title" | "recordId"> & Partial<Artifact>) {
+  return analysisWordFilename({section:"research",content:"访谈提纲",...artifact});
 }
 
 // Generate from the complete saved artifact, never from the collapsed preview.
-export function createInterviewWord(artifact: Artifact, pending = false): Uint8Array {
+export function createAnalysisWord(artifact: Artifact, pending = false): Uint8Array {
   const date = new Date(artifact.createdAt);
-  const metadata = `${pending ? "待确认提纲" : "分析记录"}${artifact.recordId ? ` ${artifact.recordId}` : ""} · V${artifact.version}${Number.isNaN(date.getTime()) ? "" : ` · ${date.toISOString().slice(0, 10)}`}`;
+  const metadata = `${pending ? "待确认分析记录" : "分析记录"}${artifact.recordId ? ` ${artifact.recordId}` : ""}${Number.isNaN(date.getTime()) ? "" : ` · ${date.toISOString().slice(0, 10)}`}`;
   let body = paragraph(analysisRecordTitle(artifact), "Title") + paragraph(metadata, "Subtitle") + bodyParagraphs(artifact.content);
   if (artifact.interview) {
     body += paragraph("访谈原话", "Heading1");
@@ -92,3 +102,5 @@ export function createInterviewWord(artifact: Artifact, pending = false): Uint8A
     "word/_rels/document.xml.rels": strToU8(`<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="${relNs}"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/></Relationships>`),
   });
 }
+
+export const createInterviewWord = createAnalysisWord;

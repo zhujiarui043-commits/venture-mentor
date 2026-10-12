@@ -1,20 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
-import { GripVertical, Maximize2, Minimize2, Sparkles, X } from "lucide-react";
+import { GripVertical, Maximize2, Minimize2, X } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
 
-const DEFAULT_WIDTH = 370;
-const MIN_WIDTH = 300;
-const MAX_WIDTH = 760;
+const DEFAULT_WIDTH = 520;
+const MIN_WIDTH = 360;
+const MAX_WIDTH = 920;
 
 export function mentorPanelBounds(workspaceWidth: number) {
   return {min: MIN_WIDTH, max: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, workspaceWidth > 0 ? workspaceWidth - 320 : MAX_WIDTH))};
 }
 
-export function MentorWorkspace({open, fullscreen, onFullscreenChange, onClose, chat, children}: {
+export function MentorWorkspace({open, fullscreen, onFullscreenChange, onClose, header, chat, children}: {
   open: boolean; fullscreen: boolean; onFullscreenChange: (value: boolean) => void;
-  onClose: () => void; chat: ReactNode; children: ReactNode;
+  onClose: () => void; header?: ReactNode; chat: ReactNode; children: ReactNode;
 }) {
   const workspaceRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLElement>(null);
@@ -82,6 +82,7 @@ export function MentorWorkspace({open, fullscreen, onFullscreenChange, onClose, 
   }
 
   return <div ref={workspaceRef} className={`body-grid ${open ? "with-chat" : ""} ${expanded ? "chat-fullscreen" : ""} ${resizing ? "chat-resizing" : ""}`} style={{"--mentor-panel-width":`${width}px`} as CSSProperties}>
+    {header}
     {children}
     {open && <aside ref={panelRef} id="mentor-panel" className={`mentor-panel ${expanded ? "mentor-panel-fullscreen" : ""}`} role={expanded ? "dialog" : undefined} aria-modal={expanded ? true : undefined} aria-label="AI 创业导师对话">
       {!expanded && <div className="mentor-resize-handle" role="separator" tabIndex={0} aria-label="调整导师对话宽度" aria-orientation="vertical" aria-valuemin={bounds.min} aria-valuemax={bounds.max} aria-valuenow={Math.round(width)} aria-valuetext={`${Math.round(width)} 像素`} aria-controls="mentor-panel" title="拖动调整宽度，也可使用左右方向键"
@@ -92,8 +93,8 @@ export function MentorWorkspace({open, fullscreen, onFullscreenChange, onClose, 
           if (next !== null) {event.preventDefault(); setPreferredWidth(Math.max(bounds.min, Math.min(bounds.max, next)));}
         }}><span className="mentor-resize-grip"><GripVertical size={15} aria-hidden="true"/></span></div>}
       <div className="mentor-header">
-        <span className="mentor-avatar"><Sparkles size={17}/></span>
-        <div className="mentor-header-copy"><strong>AI 创业导师</strong><small>DeepSeek 由服务器连接</small></div>
+        <span className="mentor-avatar" aria-hidden="true">启</span>
+        <div className="mentor-header-copy"><strong>AI 创业导师</strong><small><span className="status-dot" aria-hidden="true"/> 陪你厘清每一步</small></div>
         <div className="mentor-panel-actions">
           {expanded && <ThemeToggle/>}
           <button ref={fullscreenButtonRef} type="button" className="mentor-fullscreen-button" aria-label={expanded ? "退出导师全屏" : "全屏显示导师对话"} aria-pressed={expanded} title={expanded ? "退出全屏（Esc）" : "全屏显示"} onClick={() => onFullscreenChange(!expanded)}>{expanded ? <Minimize2 size={17}/> : <Maximize2 size={17}/>}</button>

@@ -31,7 +31,7 @@ function excerpt(text: string, terms: string[], limit: number) {
 
 export function selectRelevantMemory(state: ProjectState, section: Section, message: string) {
   const terms = queryTerms(message);
-  const explicitIds = new Set((message.match(/\b(?:H|M|A)\d{2,}\b/giu) || []).map(id => id.toUpperCase()));
+  const explicitIds = new Set((message.match(/\b(?:H|M|A|Q|T|U|C|D|B|O|R)\d{2,}\b/giu) || []).map(id => id.toUpperCase()));
   const archivedArtifacts = numberAnalysisRecords(state.artifacts).slice(0, -3).map((a, index) => ({
     value: a,
     score: relevance(`${a.title} ${a.content} ${a.limitations} ${a.nextStep}`, terms) + (a.section === section ? 3 : 0) + (explicitIds.has(a.recordId!.toUpperCase()) ? 20 : 0),

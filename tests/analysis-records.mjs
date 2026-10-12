@@ -15,14 +15,14 @@ const require = createRequire(import.meta.url);
 const temp = await mkdtemp(join(tmpdir(), "analysis-records-"));
 let preview, browser, uiDir;
 try {
-  for (const name of ["types", "interview-word", "source-links", "competition-view", "analysis-record", "word-export-button"]) {
-    const path = ["types", "interview-word"].includes(name) ? `lib/${name}.ts` : `components/${name}.tsx`;
+  for (const name of ["types", "competition-workspace", "interview-word", "source-links", "competition-view", "analysis-record", "word-export-button"]) {
+    const path = ["types", "competition-workspace", "interview-word"].includes(name) ? `lib/${name}.ts` : `components/${name}.tsx`;
     let code = ts.transpileModule(await readFile(join(root, path), "utf8"), {compilerOptions:{module:ts.ModuleKind.ESNext, target:ts.ScriptTarget.ES2022, jsx:ts.JsxEmit.ReactJSX}}).outputText
       .replace(/(?:@\/components\/|@\/lib\/|\.\/)([a-z-]+)(?=")/gu, "./$1.mjs");
     for (const dependency of ["react/jsx-runtime", "react", "fflate", "lucide-react"]) code = code.replaceAll(`from "${dependency}"`, `from ${JSON.stringify(pathToFileURL(require.resolve(dependency)).href)}`);
     await writeFile(join(temp, `${name}.mjs`), code);
   }
-  const {createInterviewWord, interviewWordFilename} = await import(pathToFileURL(join(temp, "interview-word.mjs")));
+  const {createAnalysisWord, analysisWordFilename} = await import(pathToFileURL(join(temp, "interview-word.mjs")));
   const {AnalysisRecord} = await import(pathToFileURL(join(temp, "analysis-record.mjs")));
   const {CompetitionTable, CompetitionDetails} = await import(pathToFileURL(join(temp, "competition-view.mjs")));
   const questions = Array.from({length:32}, (_, i) => `${i + 1}. 请回忆第${i + 1}次出门前挑选衣服的实际经历，发生了什么？`);
@@ -30,7 +30,7 @@ try {
     content:["## 招募条件", "- 过去一个月有相关实际经历的大学生", "## 开场与经历追问", "说明：**取得录音同意**；不暗示产品价值。", "特殊文本：<用户 & 队友> 中文 English 😀", ...questions, "## 收尾", "最后请问：还有什么容易被忽略的情况？"].join("\n"),
     limitations:"本提纲用于探索，不能直接验证付费意愿。", nextStep:"先完成两次试访谈，再调整问题。",
     sources:[{label:"用户提供的招募要求", detail:"仅访谈近期有真实经历的同学。", url:"https://example.com/research?a=1&b=2", date:"2026-10-01"}]};
-  const bytes = createInterviewWord(artifact);
+  const bytes = createAnalysisWord(artifact);
   const zip = unzipSync(bytes);
   for (const part of ["[Content_Types].xml", "_rels/.rels", "word/document.xml", "word/styles.xml", "word/numbering.xml", "word/_rels/document.xml.rels"]) assert.ok(zip[part], `Missing DOCX part ${part}`);
   const extracted = (await mammoth.extractRawText({buffer:Buffer.from(bytes)})).value;
@@ -42,23 +42,44 @@ try {
   assert.match(xml, /w:numPr/u);
   assert.match(xml, /&lt;用户 &amp; 队友&gt;/u);
   assert.ok(!strFromU8(zip["word/styles.xml"]).includes("w:pageBreakBefore"));
-  assert.equal(interviewWordFilename(artifact), "访谈提纲-校园场景访谈提纲-V3.docx");
-  const filename = interviewWordFilename({...artifact, title:'../CON: A\\B<>"|?* ' + "字".repeat(150)});
-  assert.ok(filename.endsWith("-V3.docx") && !/[<>:"/\\|?*]/u.test(filename) && filename.length < 95);
-  assert.equal(interviewWordFilename({...artifact, title:"   "}), "访谈提纲-未命名-V3.docx");
-  assert.equal(interviewWordFilename({...artifact,title:"M05 · 校园访谈提纲"}),"访谈提纲-校园访谈提纲-V3.docx");
-  const draftWord=(await mammoth.extractRawText({buffer:Buffer.from(createInterviewWord({...artifact,title:"M07 · 校园访谈提纲"},true))})).value;
-  assert.ok(draftWord.includes("待确认提纲") && !draftWord.includes("M07 · 校园访谈提纲"));
+  assert.equal(analysisWordFilename(artifact), "访谈提纲-校园场景访谈提纲.docx");
+  const filename = analysisWordFilename({...artifact, title:'../CON: A\\B<>"|?* ' + "字".repeat(150)});
+  assert.ok(filename.endsWith(".docx") && !/[<>:"/\\|?*]/u.test(filename) && filename.length < 95);
+  assert.equal(analysisWordFilename({...artifact, title:"   "}), "调研分析-未命名.docx");
+  assert.equal(analysisWordFilename({...artifact,title:"M05 · 校园访谈提纲"}),"访谈提纲-校园访谈提纲.docx");
+  assert.equal(analysisWordFilename({...artifact,title:"M05类校园访谈提纲"}),"访谈提纲-校园访谈提纲.docx");
+  const cleanedWord=(await mammoth.extractRawText({buffer:Buffer.from(createAnalysisWord({...artifact,title:"Mxx类校园访谈提纲 · V3"}))})).value;
+  assert.ok(cleanedWord.includes("校园访谈提纲") && !cleanedWord.includes("Mxx类") && !cleanedWord.includes("· V3"));
+  const draftWord=(await mammoth.extractRawText({buffer:Buffer.from(createAnalysisWord({...artifact,title:"M07 · 校园访谈提纲"},true))})).value;
+  assert.ok(draftWord.includes("待确认分析记录") && !draftWord.includes("M07 · 校园访谈提纲"));
   const quotes = {...artifact, interview:{sourceId:"M01", quotes:[{quote:"我出门前总是犹豫很久。", direction:"背景", sourceId:"M01", hypothesisId:"H01"}], limitations:"只访谈了一人"}};
-  assert.match((await mammoth.extractRawText({buffer:Buffer.from(createInterviewWord(quotes))})).value, /来源 M01[\s\S]*我出门前总是犹豫很久。/u);
+  assert.match((await mammoth.extractRawText({buffer:Buffer.from(createAnalysisWord(quotes))})).value, /来源 M01[\s\S]*我出门前总是犹豫很久。/u);
 
+  for (const [extra,prefix,id] of [
+    [{title:"问卷调查结果分析",survey:{totalRows:2,columns:[],warnings:[]}},"问卷调查","Q01"],
+    [{title:"MVP 测试结果",funnel:{stages:[],warnings:[]}},"MVP测试","T01"],
+    [{title:"调研准备事项"},"调研分析","U01"],
+  ]) {
+    const researchArtifact={...artifact,...extra,recordId:id};
+    const exportedName=analysisWordFilename(researchArtifact);
+    assert.equal(exportedName,`${prefix}-${extra.title}-${id}.docx`);
+    assert.ok(!exportedName.includes("访谈"));
+    const text=(await mammoth.extractRawText({buffer:Buffer.from(createAnalysisWord(researchArtifact,true))})).value;
+    assert.ok(text.includes("待确认分析记录") && text.includes(id));
+    const markup=renderToStaticMarkup(createElement(AnalysisRecord,{artifact:researchArtifact},"完整调研结果"));
+    assert.ok(markup.includes("导出 Word"));
+  }
   const record = renderToStaticMarkup(createElement(AnalysisRecord, {artifact}, createElement("div", {className:"artifact-content"}, artifact.content)));
   assert.match(record, /<details class="analysis-record">/u);
   assert.ok(!/<details[^>]*\bopen[=> ]/u.test(record));
   assert.ok(record.includes(questions.at(-1)) && record.includes("导出 Word"));
+  const chatRecord = renderToStaticMarkup(createElement(AnalysisRecord, {artifact,expanded:true}, artifact.content));
+  assert.match(chatRecord, /<details class="analysis-record" open="">/u);
+  assert.ok(chatRecord.includes(questions.at(-1)) && !chatRecord.includes("待确认"));
   const numberedRecord = renderToStaticMarkup(createElement(AnalysisRecord, {artifact:{...artifact,recordId:"A09"}}, "完整提纲"));
-  assert.ok(numberedRecord.includes("分析记录 A09 · V3"));
-  assert.ok((await mammoth.extractRawText({buffer:Buffer.from(createInterviewWord({...artifact,recordId:"A09"}))})).value.includes("分析记录 A09 · V3"));
+  assert.ok(numberedRecord.includes("分析记录 A09") && !numberedRecord.includes("· V3"));
+  assert.equal(analysisWordFilename({...artifact,recordId:"A09"}),"访谈提纲-校园场景访谈提纲-A09.docx");
+  assert.ok((await mammoth.extractRawText({buffer:Buffer.from(createAnalysisWord({...artifact,recordId:"A09"}))})).value.includes("分析记录 A09"));
   // Export must stay outside the toggle, available even when the record is closed.
   assert.ok(record.indexOf("record-actions") > record.indexOf("</details>"));
   for (const section of ["overview", "diagnosis", "competitors", "hypotheses", "research", "canvas"]) {
@@ -74,6 +95,10 @@ try {
   assert.ok(!details.includes("<table") && !/<details[^>]*\bopen[=> ]/u.test(details));
   for (const field of ["name", "audience", "task", "feature", "price", "limitation", "sourceQuote", "verification", "sourceUrl"]) assert.ok(details.includes(competition.competitors[0][field]));
   assert.ok(details.includes(competition.gap) && details.includes(competition.unknowns[0]) && details.includes("查看本轮网页来源"));
+  const userChecked={...competition,competitors:[{...competition.competitors[0],price:"99元",verification:"部分字段已核实",userVerifications:{price:{quote:"价格我已经核实了，99元",confirmedAt:"2026-10-12T02:00:00Z"}}}]};
+  assert.ok(renderToStaticMarkup(createElement(CompetitionTable,{competition:userChecked})).includes("99元（用户已核实）"));
+  const checkedDetails=renderToStaticMarkup(createElement(CompetitionDetails,{competition:userChecked}));
+  assert.ok(checkedDetails.includes("用户核实记录") && checkedDetails.includes("价格我已经核实了，99元") && checkedDetails.includes("部分字段已核实"));
   const empty = renderToStaticMarkup(createElement(CompetitionDetails, {competition:{...competition, competitors:[]}}));
   assert.ok(empty.includes("网页摘录") && empty.includes("https://example.com/product"));
   const unsafe = renderToStaticMarkup(createElement(CompetitionDetails, {competition:{...competition, competitors:[{...competition.competitors[0], sourceUrl:"javascript:alert(1)", citations:[]}]}}));
@@ -110,7 +135,7 @@ try {
     const downloaded = page.waitForEvent("download");
     await page.locator(".word-export-button").first().click();
     const download = await downloaded;
-    assert.equal(download.suggestedFilename(), interviewWordFilename(artifact));
+    assert.equal(download.suggestedFilename(), analysisWordFilename(artifact));
     const stream = await download.createReadStream();const chunks=[];for await (const chunk of stream) chunks.push(chunk);
     assert.ok((await mammoth.extractRawText({buffer:Buffer.concat(chunks)})).value.includes(questions.at(-1)));
     const competitorRecord = page.locator(".analysis-record").last();
@@ -150,8 +175,8 @@ try {
     const records=studioPage.locator(".analysis-record");
     assert.equal(await records.count(),2);
     assert.deepEqual(await records.evaluateAll(nodes=>nodes.map(node=>node.open)),[false,false]);
-    assert.equal(await records.first().locator(".artifact-top span").textContent(),"分析记录 A02 · V2");
-    assert.equal(await records.nth(1).locator(".artifact-top span").textContent(),"分析记录 A01 · V1");
+    assert.equal(await records.first().locator(".artifact-top span").textContent(),"分析记录 A02");
+    assert.equal(await records.nth(1).locator(".artifact-top span").textContent(),"分析记录 A01");
     assert.equal(await records.first().locator(".artifact-content").isVisible(),false);
     await records.first().locator("summary").first().click();
     assert.ok(await records.first().locator(".artifact-content").isVisible());
@@ -163,7 +188,7 @@ try {
     const studioStream=await studioDownload.createReadStream(), studioChunks=[];
     for await (const chunk of studioStream) studioChunks.push(chunk);
     const studioWord=(await mammoth.extractRawText({buffer:Buffer.concat(studioChunks)})).value;
-    assert.ok(studioWord.includes("分析记录 A02 · V2") && studioWord.includes("新版追加追问"));
+    assert.ok(studioWord.includes("分析记录 A02") && studioWord.includes("新版追加追问"));
     assert.ok(studioWord.includes("用户材料 M02 · 补充访谈.docx"));
     await studioPage.screenshot({path:join(screenshots,"research-workspace.png"),fullPage:true});
     assert.deepEqual(studioErrors,[]);
@@ -203,7 +228,7 @@ try {
     await pendingPage.locator(".pending-record .word-export-button").click();
     const draftDownload=await draftDownloadPromise;
     const draftStream=await draftDownload.createReadStream(),draftChunks=[];for await(const chunk of draftStream)draftChunks.push(chunk);
-    assert.ok((await mammoth.extractRawText({buffer:Buffer.concat(draftChunks)})).value.includes("待确认提纲"));
+    assert.ok((await mammoth.extractRawText({buffer:Buffer.concat(draftChunks)})).value.includes("待确认分析记录"));
     await pendingToolbar.getByRole("button",{name:"修改建议",exact:true}).click();
     assert.ok(await pendingInput.evaluate(node=>node===document.activeElement));
     await pendingInput.fill("为什么要问这个问题？");await pendingPage.getByRole("button",{name:"发送",exact:true}).click();
@@ -225,7 +250,7 @@ try {
     await pendingToolbar.waitFor({state:"detached"});
     assert.equal(await pendingPage.locator(".pending-record").count(),0);
     assert.equal(await pendingPage.locator(".analysis-record").count(),3);
-    assert.equal(await pendingPage.locator(".analysis-record").first().locator(".artifact-top span").textContent(),"分析记录 A03 · V3");
+    assert.equal(await pendingPage.locator(".analysis-record").first().locator(".artifact-top span").textContent(),"分析记录 A03");
     assert.ok((await pendingPage.locator(".analysis-record").first().locator(".artifact-content").textContent()).includes("本轮修改"));
     assert.deepEqual(pendingErrors,[]);await pendingPage.close();
 
@@ -257,7 +282,7 @@ try {
     await competitionPage.getByRole("button",{name:"确认保存",exact:true}).click();
     await competitionPage.waitForFunction(()=>document.querySelector(".competition-table")?.textContent?.includes("99元（用户补充，待核实）"));
     assert.equal(await competitionPage.locator(".analysis-record").count(),2);
-    assert.equal(await competitionPage.locator(".analysis-record").first().locator(".artifact-top span").textContent(),"分析记录 A02 · V2");
+    assert.equal(await competitionPage.locator(".analysis-record").first().locator(".artifact-top span").textContent(),"分析记录 C02");
     assert.deepEqual(await competitionPage.locator(".analysis-record").evaluateAll(nodes=>nodes.map(node=>node.open)),[false,false]);
     assert.deepEqual(competitionState.artifacts[0],oldCompetitionRecord);
     await competitionPage.screenshot({path:join(screenshots,"competition-revision.png"),fullPage:true});

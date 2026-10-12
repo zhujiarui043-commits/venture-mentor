@@ -42,10 +42,11 @@ export function materialContext(materials: ProjectState["materials"]) {
 }
 
 // Bind every quotation to an actual document, never to the combined context's headings.
-export function bindMaterialSources(proposal: Proposal, materials: ProjectState["materials"]) {
+export function bindMaterialSources(proposal: Proposal, materials: ProjectState["materials"], messageId?: string) {
   const sourceFor = (quote: string, preferred?: string) => materials.find(item => item.id === preferred && item.content.includes(quote))
     || materials.find(item => quote.trim() && item.content.includes(quote));
   proposal.evidence = proposal.evidence.flatMap(item => {
+    if ((messageId && item.source === messageId) || (item.source !== "当前材料" && !materials.some(material=>material.id===item.source))) return [item];
     const source = sourceFor(item.quote,item.source);
     return source ? [{...item,source:source.id}] : [];
   });
@@ -53,7 +54,10 @@ export function bindMaterialSources(proposal: Proposal, materials: ProjectState[
     if (meta.sourceRef === "当前材料") meta.sourceRef = sourceFor(proposal.fields[key])?.id;
   }
   const refs = (values: string[]) => [...new Set(values.flatMap(ref => ref === "当前材料" ? materials.map(item => item.id) : [ref]))];
-  for (const dimension of proposal.artifact?.diagnosis?.dimensions || []) dimension.sourceRefs = refs(dimension.sourceRefs);
+  for (const dimension of proposal.artifact?.diagnosis?.dimensions || []) {
+    dimension.sourceRefs = refs(dimension.sourceRefs);
+    if (dimension.scoreTriggerRefs) dimension.scoreTriggerRefs = refs(dimension.scoreTriggerRefs);
+  }
   for (const canvasModule of proposal.artifact?.canvas?.modules || []) canvasModule.sourceRefs = refs(canvasModule.sourceRefs);
   if (proposal.artifact?.interview) {
     const interview = proposal.artifact.interview;

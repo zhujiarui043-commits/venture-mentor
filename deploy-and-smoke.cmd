@@ -26,7 +26,11 @@ if "%APP_D1_DATABASE_ID%"=="00000000-0000-4000-8000-000000000000" (
 
 call pnpm.cmd run test:logic
 if errorlevel 1 exit /b 1
+call pnpm.cmd run test:diagnosis
+if errorlevel 1 exit /b 1
 call pnpm.cmd run test:search
+if errorlevel 1 exit /b 1
+call pnpm.cmd run test:interview-hypotheses
 if errorlevel 1 exit /b 1
 call pnpm.cmd run test:materials
 if errorlevel 1 exit /b 1
@@ -46,9 +50,11 @@ if not "%BUILT_D1_DATABASE_ID%"=="%APP_D1_DATABASE_ID%" (
   exit /b 1
 )
 
+call pnpm.cmd run db:migrate:remote
+if errorlevel 1 exit /b 1
 call pnpm.cmd exec wrangler deploy --config dist/server/wrangler.json --keep-vars
 if errorlevel 1 (
-  echo Deployment failed. Check the Wrangler output above. Existing remote data was not migrated by this script.
+  echo Deployment failed. Login tables were migrated; existing project records were preserved. Check the Wrangler output above.
   exit /b 1
 )
 

@@ -8,7 +8,7 @@ type RuleRef = readonly [kb: string, indices: readonly number[]];
 // Put the task's decision rules before examples so short prompts still retrieve useful rules.
 const taskRules: Record<KnowledgeTask, readonly RuleRef[]> = {
   overview: [["KB01", [4, 5, 2, 3, 7]], ["KB02", [1, 3, 8]], ["KB03", [1, 5, 6]]],
-  diagnosis: [["KB04", [5, 6, 3, 4, 7]], ["KB05", [4, 6]], ["KB03", [3, 5]]],
+  diagnosis: [["KB04S", [0, 1, 2, 3]], ["KB04", [5, 3, 4, 7]], ["KB05", [4, 6]], ["KB03", [3, 5]]],
   competitors: [["KB11", [5, 7, 8, 4, 3, 10]], ["KB05", [6]]],
   hypotheses: [["KB05", [3, 6, 7, 4, 2, 9]], ["KB01", [4]]],
   interview: [["KB07", [8, 2, 4, 7, 1, 9]], ["KB05", [6]]],
@@ -51,7 +51,7 @@ export function selectKnowledge(section: Section, message: string, state: Projec
       if (!chunk || remaining < 350 || kbRemaining < 350) continue;
       const header = `${kb} ${chunk.title}\n`;
       const excerpt = chunk.text.slice(0, Math.min(2800, remaining - header.length - 2, kbRemaining - header.length - 2));
-      if (excerpt.length < 200) continue;
+      if (excerpt.length < 200 && kb !== "KB04S") continue;
       selected.push(header + excerpt);
       remaining -= header.length + excerpt.length + 2;
       kbRemaining -= header.length + excerpt.length + 2;
