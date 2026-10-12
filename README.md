@@ -1,5 +1,7 @@
 # 启点 · AI 创业导师
 
+[中文](#启点--ai-创业导师) | [English](#qidian--ai-venture-mentor)
+
 面向早期创业者的 AI 创业验证工作台。它把项目定义、用户研究、假设管理、竞品分析、创意诊断和商业模式梳理集中在一个可持续记录的工作空间里，帮助创业者把模糊想法逐步转化为可验证的行动。
 
 ## 主要功能
@@ -86,6 +88,102 @@ docs/         开发、部署和账号说明
 
 这是一个用于创业验证的功能测试版。AI 输出用于整理信息、提出假设和安排验证行动，不代表已经验证的市场结论，也不能替代真实用户研究、财务判断或专业意见。
 
-## License
+## 许可证
 
 当前仓库未声明开源许可证，代码使用范围以仓库所有者的授权为准。
+
+---
+
+# Qidian · AI Venture Mentor
+
+[中文](#启点--ai-创业导师) | [English](#qidian--ai-venture-mentor)
+
+An AI-powered venture validation workspace for early-stage founders. Qidian brings project definition, user research, hypothesis management, competitor analysis, idea assessment, and business model planning into a persistent workspace, helping founders turn initial ideas into actions they can test.
+
+## Features
+
+- **AI venture mentor**: Maintains conversations grounded in the current project, identifies tasks, and produces structured outputs.
+- **Project definition**: Organizes target users, problems, solutions, alternatives, commercialization plans, and execution constraints.
+- **User research**: Supports uploading, parsing, and analyzing interview, survey, and MVP test materials, with Word export.
+- **Hypotheses and evidence**: Evaluates hypotheses against original source material and preserves sources, versions, quotations, limitations, and next validation steps.
+- **Eight-dimension idea assessment**: Generates dimension scores from 0 to 4, supporting reasoning, and priorities based on assessment criteria.
+- **Competitor insights**: Uses Tavily Search and retains source pages, excerpts, comparisons, and revision history.
+- **Business model canvas**: Organizes customer segments, value propositions, channels, relationships, revenue, resources, activities, partners, and costs.
+- **Analysis records**: Numbers records separately by module and preserves historical versions, sources, and traceable evidence.
+- **Accounts**: Supports test-code login, email registration, password recovery using recovery codes, and separate project workspaces.
+
+## Tech Stack
+
+Next.js, React, TypeScript, Vite/Vinext, Cloudflare Workers, Cloudflare D1, Drizzle ORM, Tailwind CSS, DeepSeek API, and Tavily Search API.
+
+## Local Setup
+
+Requirements: Node.js 22.13.0 or later and pnpm 11.
+
+```bash
+pnpm install --frozen-lockfile
+cp .dev.vars.example .dev.vars
+pnpm run build
+pnpm exec wrangler d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_motionless_firebird.sql
+pnpm run db:migrate:local
+pnpm run dev
+```
+
+Copying the configuration and creating the base tables are first-time setup steps. Skip them if `.dev.vars` and the database already exist, and fill in the configuration before starting the app. Open the local URL printed in the terminal. Keep `.dev.vars` local: it holds variables such as `DEEPSEEK_API_KEY`, `TAVILY_API_KEY`, `SESSION_SECRET`, and test access codes. Never commit it to Git.
+
+For detailed Mac setup and deployment instructions, see [docs/MACOS.md](docs/MACOS.md). For account usage, see [docs/邮箱与测试码登录.md](docs/邮箱与测试码登录.md). These supporting documents are currently in Chinese.
+
+## Common Commands
+
+```bash
+pnpm run dev                 # Local development
+pnpm run build               # Build
+pnpm run lint                # Static checks
+pnpm run test:logic          # Core logic regression tests
+pnpm run test:search         # Competitor search regression tests
+pnpm run test:diagnosis      # Idea assessment regression tests
+pnpm run test:materials      # Material parsing regression tests
+pnpm run test:records        # Analysis record regression tests
+pnpm run test:word-export-ui # Word export regression tests
+pnpm run db:migrate:local    # Local database migration
+```
+
+See [`package.json`](package.json) for the complete list of test scripts.
+
+See [Project Structure](docs/PROJECT_STRUCTURE.md) for directory purposes and file retention guidelines (in Chinese).
+
+## Deployment
+
+The project targets Cloudflare Workers and stores project data in Cloudflare D1. Once local builds and regression checks pass, run:
+
+```bash
+bash deploy-and-smoke.sh
+```
+
+Before deploying, confirm your Cloudflare login, D1 configuration, and Worker Secrets are ready. The script reads the existing deployment configuration, builds the project, and performs deployment checks. Windows users can use `deploy-and-smoke.cmd`.
+
+## Project Structure
+
+```text
+app/          Pages, styles, and API routes
+components/   React UI components
+lib/          AI workflows, business logic, and material processing
+db/           Database connection and schema
+drizzle/      Database migrations
+knowledge/    Venture methods and assessment rules
+scripts/      Build, migration, and deployment helpers
+tests/        Logic, API, and browser regression tests
+docs/         Development, deployment, and account documentation
+```
+
+## Data and Security
+
+Project records are stored in D1. Test codes and email accounts use separate project ownership mechanisms. Store API keys only in local environment files or Cloudflare Worker Secrets. Original knowledge-base documents, databases, secrets, dependency directories, and build artifacts are not part of the public source code.
+
+## Status
+
+This is a functional test version for venture validation. AI outputs help organize information, formulate hypotheses, and plan validation activities. They are not validated market conclusions and do not replace real user research, financial judgment, or professional advice.
+
+## License
+
+This repository does not currently specify an open-source license. Use of the code is subject to authorization from the repository owner.
