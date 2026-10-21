@@ -25,13 +25,13 @@ export function proposalChanges(state: ProjectState, proposal: Proposal): Propos
 }
 
 export function hasProposalChanges(proposal: Proposal): boolean {
-  return !!(Object.keys(proposal.fields).length || proposal.fieldRemovals?.length || proposal.projectTitle || proposal.artifact || proposal.hypothesis || proposal.evidence.length || proposal.hypothesisAssessments?.length || proposal.hypothesisUpdates?.length);
+  return !!(Object.keys(proposal.fields).length || proposal.fieldRemovals?.length || proposal.projectTitle || proposal.artifact || proposal.hypothesis || proposal.hypotheses?.length || proposal.evidence.length || proposal.hypothesisAssessments?.length || proposal.hypothesisUpdates?.length);
 }
 
 export function activeProposal(state: ProjectState): Proposal | null {
   if (!state.pending) return null;
   const proposal = proposalChanges(state, {...state.pending, fields: state.pending.fields || {},
-    artifact: state.pending.artifact || null, hypothesis: state.pending.hypothesis || null, evidence: state.pending.evidence || []});
+    artifact: state.pending.artifact || null, hypothesis: state.pending.hypothesis || null, hypotheses: state.pending.hypotheses || [], evidence: state.pending.evidence || []});
   return hasProposalChanges(proposal) ? proposal : null;
 }
 
@@ -55,7 +55,8 @@ export function mergePendingProposal(state: ProjectState, incoming: Proposal): P
     fieldStatuses: {...previous.fieldStatuses, ...next.fieldStatuses},
     fieldMeta: {...previous.fieldMeta, ...next.fieldMeta},
     projectTitle: next.projectTitle || previous.projectTitle,
-    artifact: next.artifact || previous.artifact, hypothesis: next.hypothesis || previous.hypothesis, evidence,
+    artifact: next.artifact || previous.artifact, hypothesis: next.hypothesis || previous.hypothesis,
+    hypotheses: [...(previous.hypotheses || []), ...(next.hypotheses || [])], evidence,
     hypothesisAssessments: [...(previous.hypothesisAssessments || []).filter(a => !next.hypothesisAssessments?.some(b => a.hypothesisId === b.hypothesisId)), ...(next.hypothesisAssessments || [])],
     hypothesisUpdates: [...(previous.hypothesisUpdates || []).filter(a => !next.hypothesisUpdates?.some(b => a.hypothesisId === b.hypothesisId)), ...(next.hypothesisUpdates || [])]});
   return hasProposalChanges(merged) ? merged : null;

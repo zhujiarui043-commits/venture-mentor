@@ -249,6 +249,18 @@ try {
   reset();repairResponses=[plainReply];
   assert.equal((await POST(request({message:"MVP是什么意思？",webSearch:false,section:"research"}))).status,200);
   assert.equal(tavilyCalls,0);assert.equal(deepseekCalls,1);assert.equal(storage.project.state.pending,null);
+  const mvpReply={reply:"已保存人工替代搭配任务卡。",artifact:{title:"人工替代搭配测试任务卡",content:"人工提供搭配并记录活动当天的实际穿着。",limitations:"便利样本，仅说明测试对象的行为。",nextStep:"核对实际穿着照片。",sourceLabels:[],mvp:{hypothesisRef:"待确认",goal:"验证真实使用",method:"人工替代",target:"近期有活动的用户",scenario:"活动当天",steps:["提前收集场景","人工给出搭配","收集穿着照片"],metrics:[{name:"实际穿着率",numerator:"穿着推荐搭配的人数",denominator:"收到搭配的人数",window:"活动当天"}],threshold:"待确认",duration:"七天",costLimit:"待确认",stopCondition:"对象撤回同意",risks:"样本小"}}};
+  reset();repairResponses=[mvpReply];
+  const mvpResponse=await POST(request({message:"围绕最重要的假设设计一张MVP验证任务卡。",webSearch:false,allowWebSearch:false,section:"research"}));
+  assert.equal(mvpResponse.status,200);
+  const savedMvp=(await mvpResponse.json()).state;
+  assert.equal(storage.saves,1);
+  assert.equal(savedMvp.pending,null);
+  assert.equal(savedMvp.artifacts[0].section,"research");
+  assert.equal(savedMvp.artifacts[0].researchMode,"MVP 测试");
+  assert.equal(savedMvp.artifacts[0].recordId,"T01");
+  assert.equal(savedMvp.artifacts[0].mvp.method,"人工替代");
+  assert.equal(savedMvp.messages.at(-1).artifactId,savedMvp.artifacts[0].id);
   for(const changes of [{allowWebSearch:false},{message:"不要联网，现在有哪些类似产品？"}]){
     reset();repairResponses=[plainReply];
     assert.equal((await POST(request({webSearch:false,section:"overview",...changes}))).status,200);
@@ -292,9 +304,45 @@ try {
   const interviewRequest=()=>request({webSearch:false,allowWebSearch:false,section:"overview",message:"分析这份访谈记录",references:interviewUpload});
   const lengthChoice={finish_reason:"length",message:{content:JSON.stringify({...interviewReply,reply:"不应保存的截断回复",artifact:{...interviewReply.artifact,content:"不应保存的截断分析"}})}};
   const modelCalls=()=>calls.filter(call=>call.url==="https://api.deepseek.com/chat/completions");
+  // Valid JSON with null optional fields must not reject a small attachment.
+  const nullableInterview={...interviewReply,suggestedQuestions:null,replyCitations:null,fields:null,fieldRemovals:null,fieldStatuses:null,hypotheses:null,hypothesisUpdates:null,hypothesisAdditionReason:null,evidence:null,
+    artifact:{...interviewReply.artifact,diagnosis:null,mvp:null,canvas:null,competition:null,
+      interview:{...interviewReply.artifact.interview,quotes:interviewReply.artifact.interview.quotes.map(quote=>({...quote,hypothesisId:null}))}}};
+  reset();repairResponses=[nullableInterview,nullableInterview];
+  assert.equal((await POST(interviewRequest())).status,200,"null optional fields are not a malformed interview result");
+  assert.equal(deepseekCalls,1);assert.equal(storage.saves,1);
+  assert.equal(storage.project.state.materials[0].content,interviewUpload[0].text);
+  assert.equal(storage.project.state.artifacts[0].content,interviewReply.artifact.content);
+  assert.equal(storage.project.state.artifacts[0].interview.quotes.length,2);
+
+  reset();repairResponses=[{...plainReply,fields:null,evidence:null,fieldStatuses:null,suggestedQuestions:null,hypotheses:null,hypothesisUpdates:null}];
+  assert.equal((await POST(request({webSearch:false,allowWebSearch:false,section:"research",message:"我找到了，这是新的访谈记录",references:interviewUpload}))).status,200);
+  assert.equal(deepseekCalls,1);assert.equal(storage.project.state.materials.length,1);
+  assert.equal(storage.project.state.artifacts.length,0);
+
+  // Repair the actual invalid field; never invent required analysis content.
+  const missingContent={...interviewReply,artifact:{...interviewReply.artifact,content:null}};
+  reset();repairResponses=[missingContent,nullableInterview];
+  assert.equal((await POST(interviewRequest())).status,200);
+  assert.equal(deepseekCalls,2);assert.equal(storage.saves,1);
+  assert.match(modelCalls()[1].payload.messages.at(-1).content,/artifact\.content 应为 string，收到 null/u);
+  assert.equal(storage.project.state.artifacts[0].content,interviewReply.artifact.content);
+
+  reset();repairResponses=[missingContent,missingContent];
+  const invalidRequired=await POST(interviewRequest());
+  assert.equal(invalidRequired.status,500);assert.equal(storage.saves,0);
+  assert.equal(storage.project.state.materials.length,0);
+  assert.match((await invalidRequired.json()).error,/artifact\.content.*材料尚未保存.*附件仍保留/u);
+
+  const badQuote={...interviewReply,artifact:{...interviewReply.artifact,interview:{...interviewReply.artifact.interview,quotes:[{quote:"我昨天整理访谈花了两个小时。",direction:"unsupported"}]}}};
+  reset();repairResponses=[badQuote,badQuote];
+  const invalidEvidence=await POST(interviewRequest());
+  assert.equal(invalidEvidence.status,500);assert.equal(storage.saves,0);
+  assert.match((await invalidEvidence.json()).error,/artifact\.interview\.quotes\.0\.direction/u);
+
   reset();repairResponses=[interviewReply];
   assert.equal((await POST(interviewRequest())).status,200);
-  assert.deepEqual(modelCalls().map(call=>call.payload.max_tokens),[8000]);
+  assert.deepEqual(modelCalls().map(call=>call.payload.max_tokens),[32000]);
   assert.equal(tavilyCalls,0);assert.equal(storage.saves,1);
   assert.equal(storage.project.state.artifacts.at(-1).section,"research");
   assert.equal(storage.project.state.artifacts.at(-1).content,interviewReply.artifact.content);
@@ -307,7 +355,7 @@ try {
   assert.equal(retriedInterview.status,200);
   assert.equal(deepseekCalls,2);assert.equal(tavilyCalls,0);assert.equal(storage.saves,1);
   const interviewModelCalls=modelCalls();
-  assert.deepEqual(interviewModelCalls.map(call=>call.payload.max_tokens),[8000,16000]);
+  assert.deepEqual(interviewModelCalls.map(call=>call.payload.max_tokens),[32000,64000]);
   const firstInterviewInput=interviewModelCalls[0].payload.messages.at(-1).content;
   const retriedInterviewInput=interviewModelCalls[1].payload.messages.at(-1).content;
   assert.ok(firstInterviewInput.includes("【用户材料 M08：最新访谈.docx】\n"+interviewUpload[0].text));
@@ -331,7 +379,7 @@ try {
   // The screenshot's attachment-only wording also gets room for a complete reply.
   reset();toolChoices=[lengthChoice];repairResponses=[interviewReply];
   assert.equal((await POST(request({webSearch:false,allowWebSearch:false,section:"research",message:"这是最新访谈记录",references:interviewUpload}))).status,200);
-  assert.deepEqual(modelCalls().map(call=>call.payload.max_tokens),[8000,16000]);
+  assert.deepEqual(modelCalls().map(call=>call.payload.max_tokens),[32000,64000]);
   assert.equal(storage.saves,1);assert.equal(storage.project.state.artifacts.length,0);
   assert.deepEqual(storage.project.state.materials.map(material=>material.id),["M01"]);
   assert.equal(storage.project.state.materials[0].content,interviewUpload[0].text);
@@ -344,7 +392,7 @@ try {
   toolChoices=[lengthChoice,lengthChoice];
   const twiceTruncated=await POST(interviewRequest());
   assert.equal(twiceTruncated.status,500);
-  assert.deepEqual(modelCalls().map(call=>call.payload.max_tokens),[8000,16000]);
+  assert.deepEqual(modelCalls().map(call=>call.payload.max_tokens),[32000,64000]);
   assert.equal(deepseekCalls,2);assert.equal(tavilyCalls,0);assert.equal(storage.saves,0);
   assert.deepEqual(storage.project,beforeTruncation);
   const truncationError=(await twiceTruncated.json()).error;
@@ -355,13 +403,13 @@ try {
 
   reset();toolChoices=[lengthChoice];repairResponses=[plainReply];
   assert.equal((await POST(request({webSearch:false,allowWebSearch:false,section:"overview",message:"什么是探索性访谈？"}))).status,200);
-  assert.deepEqual(modelCalls().map(call=>call.payload.max_tokens),[4000,8000]);
+  assert.deepEqual(modelCalls().map(call=>call.payload.max_tokens),[8000,16000]);
   assert.equal(storage.saves,1);assert.equal(storage.project.state.artifacts.length,0);
 
   // Format repair does not increase the budget unless DeepSeek reports length.
   for(const [formatRequest,reply,expectedBudget] of [
-    [()=>request({webSearch:false,allowWebSearch:false,section:"overview",message:"什么是探索性访谈？"}),plainReply,4000],
-    [interviewRequest,interviewReply,8000],
+    [()=>request({webSearch:false,allowWebSearch:false,section:"overview",message:"什么是探索性访谈？"}),plainReply,8000],
+    [interviewRequest,interviewReply,32000],
   ]){
     reset();toolChoices=[{finish_reason:"stop",message:{content:'{"reply":'}}];repairResponses=[reply];
     assert.equal((await POST(formatRequest())).status,200);
@@ -371,13 +419,14 @@ try {
 
   reset();
   storage.project.state.hypotheses.push({id:"H01",version:1,text:"整理访谈需要大量时间",category:"用户",stage:"待探索",evidenceStatus:"未进入验证",priority:"高",nextStep:"访谈",support:[],opposition:[],history:[]});
-  const references=[{name:"甲.docx",text:"甲的原话：整理资料耗时。"+"背景".repeat(5000)},{name:"乙.docx",text:"背景".repeat(5000)+"乙的原话：已有工具够用。乙给的使用场景"}];
+  const references=[{name:"甲.docx",text:"甲的原话：整理资料耗时。"+"背景".repeat(45000)},{name:"乙.docx",text:"背景".repeat(45000)+"乙的原话：已有工具够用。乙给的使用场景"}];
   repairResponses=[{...plainReply,fields:{scene:"乙给的使用场景"},evidence:[{hypothesisId:"H01",quote:"整理资料耗时",direction:"support",source:"当前材料"},{hypothesisId:"H01",quote:"已有工具够用",direction:"opposition",source:"当前材料"},{hypothesisId:"H01",quote:"【用户材料 M02：乙.docx】",direction:"support",source:"当前材料"}],artifact:{title:"访谈分析",content:"受访者有不同经历",limitations:"两份记录不代表总体",nextStep:"继续访谈",sourceLabels:[],interview:{quotes:[{quote:"整理资料耗时",direction:"支持",sourceId:"M01"},{quote:"已有工具够用",direction:"反向",sourceId:"M02"}],limitations:"个体原话"}}}, {assessments:[{hypothesisId:"H01",hypothesisVersion:1,evidenceStatus:"证据不一致",rationale:"甲描述耗时，乙报告已有替代办法。",limitations:"访谈对象与记录质量需核对。",nextStep:"追问具体整理经历。",sourceIds:["M01","M02"],evidence:[{source:"M01",quote:"整理资料耗时",direction:"support",level:"E2",relevance:"描述过去整理的时间成本，缺少具体数值。",subject:"甲"},{source:"M02",quote:"已有工具够用",direction:"opposition",level:"E2",relevance:"现有办法可能减轻问题。",subject:"乙"}]}]}];
   assert.equal((await POST(request({webSearch:false,section:"overview",message:"分析这两份访谈",references}))).status,200);
   assert.equal(storage.project.state.materials.length,2);
   assert.deepEqual(storage.project.state.materials.map(item=>item.name),["甲.docx","乙.docx"]);
   assert.equal(storage.project.state.materials[1].content,references[1].text);
-  assert.ok(calls[0].payload.messages.at(-1).content.includes("乙的原话：已有工具够用"));
+  assert.ok(calls[0].payload.messages.at(-1).content.includes(references[0].text));
+  assert.ok(calls[0].payload.messages.at(-1).content.includes(references[1].text));
   assert.deepEqual(storage.project.state.hypotheses[0].evidenceRecords.map(item=>item.sourceId),["M01","M02"]);
   assert.deepEqual(storage.project.state.artifacts.at(-1).interview.quotes.map(item=>item.sourceId),["M01","M02"]);
   assert.equal(storage.project.state.fieldMeta.scene.sourceRef,"M02");
@@ -385,7 +434,7 @@ try {
   assert.equal(storage.project.state.artifacts[0].recordId,"A01");
   assert.deepEqual(storage.project.state.materials.map(item=>item.id),["M01","M02"]);
 
-  for(const [changes,status] of [[{references:null},400],[{references:[{name:"空.docx",text:""}]},400],[{references:Array.from({length:6},()=>({name:"访谈.docx",text:"内容"}))},400],[{references:[{name:"长.docx",text:"字".repeat(12001)}]},413],[{references:Array.from({length:4},()=>({name:"满.docx",text:"字".repeat(12000)}))},413],[{references,referenceText:"重复提交"},400]]){
+  for(const [changes,status] of [[{references:null},400],[{references:[{name:"空.docx",text:""}]},400],[{references:Array.from({length:6},()=>({name:"访谈.docx",text:"内容"}))},400],[{references:[{name:"长.docx",text:"字".repeat(100001)}]},413],[{references:Array.from({length:4},()=>({name:"满.docx",text:"字".repeat(100000)}))},413],[{references,referenceText:"重复提交"},400]]){
     reset();assert.equal((await POST(request({webSearch:false,...changes}))).status,status);assert.equal(storage.saves,0);assert.equal(deepseekCalls,0);
   }
   reset();
@@ -508,6 +557,90 @@ try {
   assert.equal(storage.project.state.messages.at(-1).task.section,"canvas");
   assert.match(calls[0].payload.messages[0].content,/KB10/u);
   assert.equal(storage.project.state.artifacts.at(-1).section,"canvas");
+
+  // Canvas content labels are distinct from hypothesis evidence states.
+  assert.match(calls[0].payload.messages[0].content,/status 只能逐字使用 已记录、初步设想、待验证、未知/u);
+  reset();
+  const canvasWithStatuses = statuses => ({...plainReply,artifact:{...canvasArtifact,canvas:{...canvasArtifact.canvas,modules:canvasArtifact.canvas.modules.map((module,i)=>({...module,status:statuses[i]??module.status}))}}});
+  repairResponses=[canvasWithStatuses([" 用户陈述 ","用户已确认","已确认","待确认","候选建议","未验证","已有材料待评估","信息待补充"," 待验证 "])];
+  assert.equal((await POST(request({webSearch:false,section:"canvas",message:"生成商业画布"}))).status,200);
+  assert.equal(deepseekCalls,1);
+  assert.deepEqual(storage.project.state.artifacts.at(-1).canvas.modules.map(module=>module.status),["已记录","已记录","已记录","初步设想","初步设想","待验证","待验证","未知","待验证"]);
+  assert.equal(storage.project.state.artifacts.at(-1).canvas.modules[7].content,"");
+
+  // Unknown labels are repaired with exact allowed values, not silently accepted.
+  reset();
+  repairResponses=[canvasWithStatuses(["已验证","有待观察"]),canvasWithStatuses(["已记录","待验证"])];
+  assert.equal((await POST(request({webSearch:false,section:"canvas",message:"生成商业画布"}))).status,200);
+  assert.equal(deepseekCalls,2);
+  const canvasRetry=calls[1].payload.messages.at(-1).content;
+  assert.match(canvasRetry,/artifact\.canvas\.modules\.0\.status 收到 "已验证"，只允许 "已记录"、"初步设想"、"待验证"、"未知"/u);
+  assert.match(canvasRetry,/artifact\.canvas\.modules\.1\.status 收到 "有待观察"/u);
+  assert.equal(storage.project.state.artifacts.at(-1).canvas.modules.length,9);
+
+  reset();
+  repairResponses=[canvasWithStatuses(["已验证"]),canvasWithStatuses(["已验证"])];
+  const invalidCanvas=await POST(request({webSearch:false,section:"canvas",message:"生成商业画布"}));
+  assert.equal(invalidCanvas.status,500);
+  assert.equal(deepseekCalls,2);assert.equal(storage.saves,0);
+  assert.deepEqual(storage.project.state,state);
+
+  reset();
+  const ungroundedCanvas=canvasWithStatuses(["已记录"]);
+  ungroundedCanvas.artifact.canvas.modules[0].sourceRefs=["不存在的来源"];
+  repairResponses=[ungroundedCanvas];
+  assert.equal((await POST(request({webSearch:false,section:"canvas",message:"生成商业画布"}))).status,200);
+  assert.equal(storage.project.state.artifacts.at(-1).canvas.modules[0].status,"未知");
+  assert.equal(storage.project.state.artifacts.at(-1).canvas.modules[0].content,"");
+
+  // Reproduce object-valued conflicts from the production screenshot. Keep all
+  // textual findings and actions readable in the saved canvas after refresh.
+  reset();
+  const objectConflicts=canvasWithStatuses([]);
+  objectConflicts.artifact.canvas.conflicts=[
+    {modules:["客户细分","价值主张"],description:"两类用户的试穿动机不同",impact:"不能合并判断",nextStep:"分别记录行为差异"},
+    {module:"收入来源",gap:"付费主体尚不明确",suggestion:"确认购买者与使用者是否一致"},
+    {title:"成本缺口",details:{current:"尚无交付成本",required:["人力","渠道"]},sourceRefs:[]},
+    {conflict:"渠道尚未测试",reason:"目前只有团队设想",hypothesisRefs:["H01"]},
+    "重要合作：未确定必要合作方",
+  ];
+  repairResponses=[objectConflicts];
+  assert.equal((await POST(request({webSearch:false,section:"canvas",message:"生成商业画布"}))).status,200);
+  assert.equal(deepseekCalls,1);
+  const savedConflicts=storage.project.state.artifacts.at(-1).canvas.conflicts;
+  assert.deepEqual(savedConflicts,[
+    "相关模块：客户细分、价值主张；说明：两类用户的试穿动机不同；影响：不能合并判断；下一步：分别记录行为差异",
+    "模块：收入来源；缺口：付费主体尚不明确；建议：确认购买者与使用者是否一致",
+    "问题：成本缺口；details：current：尚无交付成本；required：人力、渠道",
+    "冲突：渠道尚未测试；原因：目前只有团队设想；关联假设：H01",
+    "重要合作：未确定必要合作方",
+  ]);
+  assert.match(calls[0].payload.messages[0].content,/conflicts 必须是字符串数组/u);
+  assert.match(calls[0].payload.messages[0].content,/商业画布输出格式示例/u);
+  const refreshedCanvas=await readProject(new Request("https://example.com/api/project",{headers:{cookie}}));
+  assert.deepEqual((await refreshedCanvas.json()).state.artifacts.at(-1).canvas.conflicts,savedConflicts);
+
+  for(const conflicts of [null,undefined]){
+    reset();
+    const noConflicts=canvasWithStatuses([]);noConflicts.artifact.canvas.conflicts=conflicts;
+    repairResponses=[noConflicts];
+    assert.equal((await POST(request({webSearch:false,section:"canvas",message:"生成商业画布"}))).status,200);
+    assert.deepEqual(storage.project.state.artifacts.at(-1).canvas.conflicts,[]);
+  }
+  for(const conflict of [{}, {description:"缺口",impact:42}, null, ["文本",false]]){
+    reset();
+    const malformed=canvasWithStatuses([]);malformed.artifact.canvas.conflicts=[conflict];
+    repairResponses=[malformed,malformed];
+    assert.equal((await POST(request({webSearch:false,section:"canvas",message:"生成商业画布"}))).status,500);
+    assert.equal(deepseekCalls,2);assert.equal(storage.saves,0);
+    assert.deepEqual(storage.project.state,state);
+  }
+  reset();
+  const missingModule=canvasWithStatuses([]);missingModule.artifact.canvas.modules.pop();
+  repairResponses=[missingModule,canvasWithStatuses([])];
+  assert.equal((await POST(request({webSearch:false,section:"canvas",message:"生成商业画布"}))).status,200);
+  assert.equal(deepseekCalls,2);
+  assert.equal(storage.project.state.artifacts.at(-1).canvas.modules.length,9);
 
   reset();
   repairResponses=[{...plainReply,artifact:{title:"测试数据复盘",content:"按提供的数据解读",limitations:"口径待核",nextStep:"核对测试对象",sourceLabels:[]}}];

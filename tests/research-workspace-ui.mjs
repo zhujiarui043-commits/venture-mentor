@@ -5,6 +5,7 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 import ts from 'typescript';
 import {createServer} from 'vite';
 import react from '@vitejs/plugin-react';
+import mammoth from 'mammoth';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
 const dir=await mkdtemp(join(root,'.ui-research-check-'));
@@ -46,6 +47,13 @@ try {
   assert.deepEqual(artifactResearchModes(artifact('legacy','问卷调查方案',{content:'先参考访谈，再开展 MVP'})),['问卷调查']);
   assert.deepEqual(artifactResearchModes(artifact('structured','访谈后续',{survey:{totalRows:1,columns:[],warnings:[]}})),['问卷调查']);
   assert.deepEqual(artifactResearchModes(artifact('explicit','启动条件与变量计划',{researchMode:'问卷调查',content:'先做访谈再定义变量'})),['问卷调查']);
+  const misplaced=artifact('legacy-task-card','AI穿搭助手 · 人工替代搭配测试任务卡',{section:'hypotheses',recordId:'R09',content:'关联假设：H05\n执行：由人工提供搭配，记录实际穿着。\n结束：核对活动当天的照片。'});
+  const restored=normalizeProjectNumbers({...emptyProject('legacy-mvp'),artifacts:[misplaced],messages:[{role:'assistant',artifactId:misplaced.id,content:'已生成任务卡',at:now}]});
+  assert.equal(restored.artifacts[0].section,'research');
+  assert.equal(restored.artifacts[0].recordId,'T01');
+  assert.equal(restored.artifacts[0].content,misplaced.content);
+  assert.deepEqual(normalizeProjectNumbers(restored),restored);
+  assert.equal(numberAnalysisRecords([artifact('hypothesis','假设清单',{section:'hypotheses',content:'下一步生成MVP验证任务卡'})])[0].section,'hypotheses');
   assert.deepEqual(researchContent([artifact('other','访谈',{section:'overview'})],[],'用户访谈').artifacts,[]);
   await writeFile(join(dir,'index.html'),'<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"/></head><body><div id="root"></div><script type="module" src="/main.tsx"></script></body></html>');
   await writeFile(join(dir,'main.tsx'),"import React from 'react';import {createRoot} from 'react-dom/client';import Studio from '@/app/studio';import {ThemeProvider} from '@/components/theme-provider';import '@/app/globals.css';createRoot(document.getElementById('root')!).render(<ThemeProvider><Studio/></ThemeProvider>);");
@@ -81,7 +89,7 @@ try {
       const download=await exported;
       assert.ok(download.suggestedFilename().endsWith(`-${ids.at(-1)}.docx`));
       if(mode!=='用户访谈')assert.ok(!download.suggestedFilename().includes('访谈'));
-      const materials=await main.locator(':scope > details.material-card > summary').allTextContents();
+      const materials=await main.locator('#research-materials-list > details.material-card > summary, :scope > details.material-card > summary').allTextContents();
       assert.equal(materials.filter(text=>/^M\d/u.test(text)).length,1);
       assert.ok(materials.some(text=>text.startsWith(materialId+' ·')));
       assert.ok(materials.some(text=>text.includes('通用或待分类材料')));
@@ -135,6 +143,20 @@ try {
   await main.getByRole('button',{name:'用户访谈',exact:true}).click();
   await main.getByRole('heading',{name:'用户访谈分析记录',exact:true}).waitFor();
   assert.equal(await main.getByRole('heading',{name:'MVP实验方案',exact:true}).count(),0);
+  state={...restored,artifacts:[misplaced]};
+  await page.reload();
+  await main.getByRole('heading',{name:'MVP 测试分析记录',exact:true}).waitFor();
+  const recoveredCard=main.locator(':scope > .artifact-card').filter({has:page.getByRole('heading',{name:misplaced.title,exact:true})});
+  assert.equal(await recoveredCard.locator('.artifact-top > span').textContent(),'分析记录 T01');
+  const recoveredDownload=page.waitForEvent('download');
+  await recoveredCard.getByRole('button',{name:/导出为 Word/u}).click();
+  const download=await recoveredDownload;
+  assert.ok(download.suggestedFilename().endsWith('-T01.docx'));
+  const stream=await download.createReadStream(),chunks=[];
+  for await(const chunk of stream)chunks.push(chunk);
+  const exportedText=(await mammoth.extractRawText({buffer:Buffer.concat(chunks)})).value;
+  assert.ok(exportedText.includes(misplaced.title));
+  assert.ok(exportedText.includes('结束：核对活动当天的照片。'));
   assert.deepEqual(errors,[]);
   console.log('调研切换验收通过：三种记录与材料分类、旧方案与结构化成果、来源关联、通用材料、A/Q/T独立编号与引用迁移、桌面和手机切换、新生成记录定位、刷新恢复及快捷建议。');
 } finally {await browser?.close();await server?.close();await rm(dir,{recursive:true,force:true});}

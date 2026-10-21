@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_TOTAL_ATTACHMENT_CHARS } from "./materials";
 import { completeWithSearch } from "./agent-search";
 import { omitUnverifiableAssessmentQuotes, omitUnverifiedAssessmentSubjects, restoreAssessmentSourceText, validateHypothesisAssessments } from "./hypothesis-assessment";
 import { selectKnowledge } from "./knowledge";
@@ -33,6 +34,13 @@ const reviewSchema = z.object({assessments:z.array(z.object({
   evidence:z.array(z.object({source:z.string(),quote:z.string().trim().min(1).max(1000),direction:z.enum(["support","opposition","boundary"]),level:z.enum(["E1","E2"]),relevance:z.string().trim().min(1).max(400),subject:z.string()})).max(12),
 }))});
 
+function parseReviewJson(content: string): unknown {
+  const trimmed = content.trim().replace(/^\uFEFF/u, "");
+  const candidate = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/iu)?.[1] || trimmed;
+  try { return JSON.parse(candidate); }
+  catch { throw new SyntaxError("评估结果格式不完整，需要重新生成"); }
+}
+
 export async function proposeInterviewHypotheses(state: ProjectState, section: Section, message: string, key: string, referenceText: string, allMethods = usesAllResearchMethods(message)): Promise<Proposal> {
   const at = new Date().toISOString();
   const base: Proposal = {id:crypto.randomUUID(),reply:"",fields:{},artifact:null,hypothesis:null,evidence:[],createdAt:at};
@@ -45,7 +53,7 @@ export async function proposeInterviewHypotheses(state: ProjectState, section: S
     || (/访谈|采访|interview/iu.test(m.name || "") && !/提纲|招募|outline/iu.test(m.name || "")) || referenceText.includes(`【用户材料 ${m.id}：`));
   if ([...explicitIds].some(id => !materials.some(m => m.id === id))) throw new Error(`指定的${label}材料编号不存在；未修改项目资料。`);
   if (!materials.length) return {...base,reply:allMethods ? "还没有可读取的调研原始材料。请附上用户访谈记录、问卷结果或 MVP 测试记录；生成的方案、提纲和 AI 分析不能作为验证证据。" : "还没有可读取的访谈原文。请附上访谈记录后发送分析请求；已有的访谈提纲和 AI 分析不能作为受访者证据。"};
-  if (materials.reduce((sum,m) => sum+m.content.length,0) > 60000) throw new Error(`${label}原始材料合计超过 60000 字，请在请求中指定本轮要分析的材料编号（如 M01、M02）；未修改项目资料。`);
+  if (materials.reduce((sum,m) => sum+m.content.length,0) > MAX_TOTAL_ATTACHMENT_CHARS) throw new Error(`${label}原始材料合计超过 ${MAX_TOTAL_ATTACHMENT_CHARS} 字，请在请求中指定本轮要分析的材料编号（如 M01、M02）；未修改项目资料。`);
   const rules = selectKnowledge("hypotheses",message,state).text;
   const interviewRules = selectKnowledge("research","分析访谈记录",state).text;
   const researchRules = allMethods ? [selectKnowledge("research","分析问卷调查结果",state).text,selectKnowledge("research","分析 MVP 测试数据",state).text].join("\n\n") : "";
@@ -58,22 +66,28 @@ sourceIds 列出本轮实际检查的材料编号。rationale 总结你的判断
 假设规则：${rules}\n访谈规则：${interviewRules}\n其他调研规则：${researchRules}`;
   const assessments: HypothesisAssessment[] = [];
   let omittedQuotes = 0;
-  for (let offset=0;offset<state.hypotheses.length;offset+=5) {
-    const hypotheses = state.hypotheses.slice(offset,offset+5);
+  const batches = Array.from({length:Math.ceil(state.hypotheses.length/5)},(_,index)=>state.hypotheses.slice(index*5,index*5+5));
+  while (batches.length) {
+    const hypotheses = batches.shift()!;
     const input = JSON.stringify({request:message,project:state.fields,hypotheses:hypotheses.map(h=>({id:h.id,version:h.version,text:h.text,category:h.category,stage:h.stage,evidenceStatus:h.evidenceStatus,evidenceRecords:h.evidenceRecords,assessment:h.assessment})),materials});
     let batch: HypothesisAssessment[] | undefined;
     let failure = "缺少完整的逐条判断";
     let previous = "";
     let lastRestored: HypothesisAssessment[] | undefined;
+    let formatFailure = false;
     for (let attempt=0;attempt<2;attempt++) {
       const choice = await completeWithSearch([{role:"system",content:system},{role:"user",content:input},...(attempt ? [
         {role:"assistant" as const,content:previous},
-        {role:"user" as const,content:`上次结果不可用：${failure}。核对指出的假设、材料、引用及受访者标识，从对应材料复制连续原话，不要改写或拼接。无法确认的标识留空；找不到的引用删除，并重新判断证据强度。返回覆盖本批全部假设的完整 JSON。`},
-      ] : [])],key,6500,{enabled:false,manual:false});
+        {role:"user" as const,content:`上次结果不可用：${failure}。核对指出的假设、材料、引用及受访者标识，从对应材料复制连续原话，不要改写或拼接。无法确认的标识留空；找不到的引用删除，并重新判断证据强度。返回覆盖本批全部假设的完整 JSON。字符串中的双引号、换行和反斜杠必须正确转义，数组元素之间必须有逗号；不要输出 Markdown 或额外说明。简洁表达，每条假设最多保留 4 条最关键的引用。`},
+      ] : [])],key,attempt ? 64000 : 32000,{enabled:false,manual:false});
       previous = choice?.message?.content || "";
       try {
-        if (choice?.finish_reason === "length") throw new Error("输出被截断，请减少引用数量并缩短判断");
-        const parsed = reviewSchema.parse(JSON.parse(choice?.message?.content || ""));
+        formatFailure = false;
+        if (choice?.finish_reason === "length") {
+          formatFailure = true;
+          throw new Error("评估结果过长被截断，需要缩短后重新生成");
+        }
+        const parsed = reviewSchema.parse(parseReviewJson(previous));
         if (parsed.assessments.length !== hypotheses.length || hypotheses.some(h => !parsed.assessments.some(a => a.hypothesisId === h.id && a.hypothesisVersion === h.version))) throw new Error("未覆盖本批全部假设及当前版本");
         const restored = omitUnverifiedAssessmentSubjects({...state,materials},restoreAssessmentSourceText({...state,materials},parsed.assessments).map(assessment => ({...assessment,
           ...(allMethods ? {researchMethods:[...new Set(materials.filter(material => assessment.sourceIds.includes(material.id)).flatMap(materialMethods))]} : {}),
@@ -81,7 +95,10 @@ sourceIds 列出本轮实际检查的材料编号。rationale 总结你的判断
         lastRestored=restored;
         validateHypothesisAssessments({...state,materials},restored);
         batch=restored; break;
-      } catch(error) { failure=error instanceof Error ? error.message : "格式不正确"; }
+      } catch(error) {
+        formatFailure ||= error instanceof SyntaxError;
+        failure=error instanceof z.ZodError ? "评估结果缺少必填字段或字段格式不正确" : error instanceof Error ? error.message : "格式不正确";
+      }
     }
     if (!batch && lastRestored) {
       const safe = omitUnverifiableAssessmentQuotes({...state,materials},lastRestored);
@@ -89,6 +106,12 @@ sourceIds 列出本轮实际检查的材料编号。rationale 总结你的判断
         try { validateHypothesisAssessments({...state,materials},safe.assessments);batch=safe.assessments;omittedQuotes+=safe.omitted; }
         catch(error) { failure=error instanceof Error ? error.message : "格式不正确"; }
       }
+    }
+    if (!batch && formatFailure && hypotheses.length > 1) {
+      // Regenerate complete assessments from originals; never salvage partial JSON.
+      // Keep every batch in memory until the whole review passes validation.
+      batches.unshift(...hypotheses.map(hypothesis=>[hypothesis]));
+      continue;
     }
     if (!batch) throw new Error(`本次${label}评估未保存：${failure.replace(/[；。]?未修改项目资料[。]?/gu, "").replace(/[。；]+$/u, "")}。系统已自动重试，仍未通过校验；项目资料保持原样，请重试。`);
     assessments.push(...batch);

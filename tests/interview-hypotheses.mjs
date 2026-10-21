@@ -46,7 +46,7 @@ try {
   const {applyProposal} = await get("apply-proposal");
   const {shouldReviewInterviewHypotheses} = await get("interview-hypotheses");
   const {planConversation} = await get("workflow");
-  const {hypothesisStatePrompt} = await get("hypothesis");
+  const {hypothesisStatePrompt,isHypothesisStateRequest} = await get("hypothesis");
   const question="根据访谈记录材料，自己总结判断是否有可以支撑假设清单的证据，然后更新假设清单";
   assert.equal(shouldReviewInterviewHypotheses(question,planConversation("overview",question).createArtifact),true);
   for (const text of ["访谈证据怎么判断？","设计访谈提纲","修订假设为每次整理访谈需要两个小时","不要更新假设清单，只分析访谈"])
@@ -72,9 +72,49 @@ try {
     assert.equal(url,"https://api.deepseek.com/chat/completions");
     const payload=JSON.parse(options.body);calls.push(payload);
     assert.equal(payload.tools,undefined,"Interview evidence must not be sent to search");
-    return Response.json({choices:[{finish_reason:"stop",message:{content:JSON.stringify(responses.shift() || {})}}]});
+    const response=responses.shift() || {};
+    return Response.json({choices:[{finish_reason:response.finishReason || "stop",message:{content:response.completionContent ?? (typeof response==="string"?response:JSON.stringify(response))}}]});
   };
   const reset=()=>{storage.project={state:structuredClone(seed),revision:1};storage.saves=0;responses=[];calls=[];};
+  // The screenshot regression: a short confirmation must update the saved card,
+  // even when the first model response only claims that the text was updated.
+  reset();
+  const oldAudience = "在需要打扮的场合，年轻女性（学生与刚工作人群）是最可能的核心用户。";
+  const newAudience = "在需要打扮的场合，不限定性别、包含对穿搭有要求的男性的年轻人（学生与刚工作人群）是最可能的核心用户。";
+  storage.project.state.hypotheses[0].text=oldAudience;
+  storage.project.state.messages.push({id:"suggest-revision",role:"assistant",content:"建议将 H01 的目标用户表述改为不限定性别，包含对穿搭有要求的男性。是否确认修改？",at:"2026-10-13"});
+  const revision={targetId:"H01",text:newAudience,category:"用户",priority:"高",nextStep:"补充男性样本并比较不同人群",changeKind:"实质修订"};
+  responses=[{reply:"H01 的表述也随之更新。",fields:{audience:"不限定性别，包含对穿搭有要求的男性"}},
+    {reply:"H01 的表述已更新；男性的经历仍需验证。",fields:{audience:"不限定性别，包含对穿搭有要求的男性"},hypothesis:revision}];
+  const confirmedRevision=await POST(request({section:"hypotheses",message:"确认"}));
+  assert.equal(confirmedRevision.status,200,JSON.stringify(await confirmedRevision.clone().json()));
+  assert.equal(calls.length,2,"只声称更新、没有修订数据的回答必须重试");
+  assert.equal(storage.project.state.hypotheses[0].text,newAudience);
+  assert.equal(storage.project.state.hypotheses[0].version,2);
+  assert.equal(storage.project.state.hypotheses[0].history[0].text,oldAudience);
+  assert.equal(storage.project.state.hypotheses[0].evidenceStatus,"未进入验证");
+  const reloadedRevision=await GET(new Request("https://example.com/api/project",{headers:{cookie}}));
+  assert.equal((await reloadedRevision.json()).state.hypotheses[0].text,newAudience,"刷新后仍显示修改后的完整表述");
+
+  reset();responses=[{reply:"H01 的表述已更新。"},{reply:"H01 的表述已更新。"}];
+  const beforeMissingRevision=structuredClone(storage.project);
+  const missingRevision=await POST(request({section:"hypotheses",message:"将 H01 假设修改为不限定性别的年轻人"}));
+  assert.equal(missingRevision.status,500);
+  assert.deepEqual(storage.project,beforeMissingRevision,"两次缺失修订数据时不能保存虚假的完成声明");
+
+  reset();responses=[{reply:"H01 的表述已更新。",hypothesis:revision},output];
+  const mixedRevision=await POST(request({section:"hypotheses",message:"分析访谈证据，同时修改 H01 假设的目标人群为不限定性别的年轻人"}));
+  assert.equal(mixedRevision.status,200,JSON.stringify(await mixedRevision.clone().json()));
+  assert.equal(calls.length,2,"同轮表述修订与证据复核均应执行");
+  assert.equal(storage.project.state.hypotheses[0].text,newAudience,"证据复核不能清掉明确要求的表述修订");
+  assert.equal(storage.project.state.hypotheses[0].history[0].assessment.evidenceStatus,"初步支持");
+
+  const combinedRevisionState=structuredClone(seed);
+  applyProposal(combinedRevisionState,{id:"combined-revision",reply:"更新",createdAt:"2026-10-13",fields:{},artifact:null,evidence:[],hypothesis:revision,hypothesisAssessments:[output.assessments[0]]});
+  assert.equal(combinedRevisionState.hypotheses[0].version,2);
+  assert.equal(combinedRevisionState.hypotheses[0].history[0].assessment.evidenceStatus,"初步支持");
+  assert.equal(combinedRevisionState.hypotheses[0].assessment,undefined,"旧版评估不能用于已扩大人群的新版");
+
   reset();responses=[output];
   const result=await POST(request());assert.equal(result.status,200,JSON.stringify(await result.clone().json()));
   assert.equal(storage.saves,1);assert.equal(calls.length,1);
@@ -90,6 +130,28 @@ try {
   responses=[output];assert.equal((await POST(request())).status,200);
   assert.equal(storage.project.state.hypotheses[0].evidenceRecords.length,2,"Reassessment must not duplicate quotes");
   assert.equal(storage.project.state.hypotheses[0].assessmentHistory.length,1);
+
+  // Formatting wrappers are accepted, but malformed JSON is regenerated from originals.
+  reset();responses=["\uFEFF```json\n"+JSON.stringify(output)+"\n```"];
+  assert.equal((await POST(request())).status,200);assert.equal(calls.length,1);
+  const malformed=JSON.stringify(output).replace('"M01","M02"','"M01" "M02"');
+  reset();responses=[malformed,output];
+  assert.equal((await POST(request())).status,200);assert.equal(calls.length,2);
+  assert.match(calls[1].messages.at(-1).content,/必须正确转义/u);
+  for (const failedResponse of [malformed,{completionContent:JSON.stringify(output),finishReason:"length"}]) {
+    reset();responses=[failedResponse,failedResponse,...output.assessments.map(a=>({assessments:[a]}))];
+    assert.equal((await POST(request())).status,200);
+    assert.equal(calls.length,6);assert.equal(storage.saves,1);
+    assert.deepEqual(calls.slice(2).map(call=>JSON.parse(call.messages[1].content).hypotheses.map(h=>h.id)),[["H01"],["H02"],["H03"],["H04"]]);
+    assert.deepEqual(storage.project.state.hypotheses.map(h=>h.evidenceStatus),output.assessments.map(a=>a.evidenceStatus));
+  }
+  reset();responses=[malformed,malformed,{assessments:[output.assessments[0]]},malformed,malformed];
+  const beforeMalformed=structuredClone(storage.project);
+  const malformedResult=await POST(request());assert.equal(malformedResult.status,500);
+  const malformedError=(await malformedResult.json()).error;
+  assert.match(malformedError,/评估结果格式不完整/u);
+  assert.ok(!malformedError.includes("JSON at position"));
+  assert.equal(storage.saves,0);assert.deepEqual(storage.project,beforeMalformed);
 
   // Reassess all three methods from saved originals, including questionnaire-only and MVP-only projects.
   for (const mode of ["问卷数据","测试数据","mixed"]) {
@@ -217,6 +279,9 @@ try {
 
   // The page shortcut reviews existing priorities before considering an addition.
   const stateRequest = {section:"hypotheses",message:hypothesisStatePrompt};
+  assert.equal(isHypothesisStateRequest("现在有哪些假设了？请从之前的对话恢复并更新假设清单"),true);
+  assert.equal(isHypothesisStateRequest("不要更新假设清单，只告诉我判断依据"),false);
+  assert.equal(planConversation("hypotheses","现在有哪些假设了？请从之前的对话恢复并更新假设清单").createArtifact,true);
   const updates = seed.hypotheses.map((h,i)=>({hypothesisId:h.id,hypothesisVersion:h.version,
     priority:["中","高","低","中"][i],rationale:"根据当前关键风险与证据缺口确定处理顺序。",nextStep:"验证当前最关键的缺口。"}));
   const stateOutput = {reply:"已更新当前假设与证据状态。",hypothesisUpdates:updates,hypothesis:null};
@@ -277,9 +342,43 @@ try {
   assert.equal(storage.project.state.hypotheses[4].text,addition.text);
   assert.deepEqual(storage.project.state.hypotheses.slice(0,4).map(h=>h.priority),updates.map(u=>u.priority));
   reset();storage.project.state.hypotheses=[];storage.project.state.materials=[];
+  const emptyListArtifact={title:"当前假设梳理",content:"当前项目需要先验证招募渠道是否可持续。",limitations:"尚无调研证据",nextStep:"记录陌生用户招募成本",sourceLabels:[]};
+  responses=[{reply:"已梳理当前假设",artifact:emptyListArtifact},{reply:"已建立首条假设",artifact:emptyListArtifact,hypothesis:addition,hypothesisAdditionReason:"当前尚无假设，项目资料需要形成首条可证伪判断。"}];
+  assert.equal((await POST(request(stateRequest))).status,200);
+  assert.equal(calls.length,2,"空清单不能只保存分析记录，必须重试并写入首条假设");
+  assert.equal(storage.project.state.hypotheses.length,1);
+  assert.equal(storage.project.state.artifacts.at(-1).section,"hypotheses");
+  reset();storage.project.state.hypotheses=[];storage.project.state.materials=[];
   responses=[{reply:"已建立首条假设",hypothesis:addition,hypothesisAdditionReason:"当前尚无假设，项目资料需要形成首条可证伪判断。"}];
   assert.equal((await POST(request(stateRequest))).status,200);
   assert.equal(storage.project.state.hypotheses[0].id,"H01");
+  // An empty persisted list can recover every hypothesis previously shown in chat in one atomic turn.
+  reset();storage.project.state.hypotheses=[];storage.project.state.materials=[];
+  const recovered=Array.from({length:6},(_,i)=>({...addition,text:`此前对话中的可证伪假设 ${i+1}`,priority:i<2?"高":i<4?"中":"低"}));
+  storage.project.state.messages=[{id:"prior-user",role:"user",content:"请帮我梳理假设",at:"2026-10-10"},{id:"prior-assistant",role:"assistant",content:recovered.map((item,i)=>`${i+1}. ${item.text}`).join("\n"),at:"2026-10-10"},...Array.from({length:20},(_,i)=>({id:`filler-${i}`,role:i%2?"assistant":"user",content:"后续普通讨论，没有列出清单。",at:"2026-10-10"}))];
+  responses=[{reply:"当前已经登记六条假设。"},{reply:"已从此前对话恢复六条假设。",hypotheses:recovered,hypothesisAdditionReason:"当前清单为空，需要把此前已向用户列出的六条假设恢复建档。"}];
+  const recoveredResponse=await POST(request({section:"hypotheses",message:"现在有哪些假设了？请从之前的对话恢复并更新假设清单"}));
+  assert.equal(recoveredResponse.status,200,JSON.stringify(await recoveredResponse.clone().json()));
+  assert.equal(calls.length,2,"只在回复文字中声称已有假设时必须重试并真正写入清单");
+  assert.deepEqual(storage.project.state.hypotheses.map(h=>h.id),["H01","H02","H03","H04","H05","H06"]);
+  assert.deepEqual(storage.project.state.hypotheses.map(h=>h.text),recovered.map(h=>h.text));
+  assert.match(calls[0].messages.map(m=>m.content||"").join("\n"),/此前对话中的可证伪假设 6/u);
+  assert.match(storage.project.state.messages.at(-1).content,/已写入假设清单/u);
+  // DeepSeek sometimes wraps otherwise valid JSON in a Markdown fence. It must still save in one turn.
+  reset();storage.project.state.hypotheses=[];storage.project.state.materials=[];
+  storage.project.state.messages=[{id:"prior-assistant",role:"assistant",content:recovered.map((item,i)=>`${i+1}. ${item.text}`).join("\n"),at:"2026-10-10"}];
+  responses=[`\`\`\`json\n${JSON.stringify({reply:"已恢复六条假设。",hypotheses:recovered,hypothesisAdditionReason:"从此前对话恢复建档。"})}\n\`\`\``];
+  assert.equal((await POST(request({section:"hypotheses",message:"请从之前的对话恢复并更新假设清单"}))).status,200);
+  assert.equal(calls.length,1);
+  assert.equal(storage.project.state.hypotheses.length,6);
+  // If structure is still unusable after retry, preserve the readable answer instead of failing the whole turn.
+  reset();storage.project.state.hypotheses=[];storage.project.state.materials=[];
+  responses=[{reply:"我找到了此前讨论过的假设。",hypotheses:"invalid"},{reply:"我找到了此前讨论过的假设。",hypotheses:"invalid"}];
+  const fallbackResponse=await POST(request({section:"hypotheses",message:"请从之前的对话恢复并更新假设清单"}));
+  assert.equal(fallbackResponse.status,200);
+  assert.equal(storage.project.state.hypotheses.length,0);
+  assert.match(storage.project.state.messages.at(-1).content,/回答已保留/u);
+  assert.match(storage.project.state.messages.at(-1).content,/没有写入/u);
   if (process.argv.includes("--browser")) {
     reset();responses=[output];
     const {createServer}=await import("vite");

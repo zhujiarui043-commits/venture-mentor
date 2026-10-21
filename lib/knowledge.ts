@@ -22,7 +22,7 @@ const taskRules: Record<KnowledgeTask, readonly RuleRef[]> = {
 export function resolveKnowledgeTask(section: Section, message: string, referenceText = ""): KnowledgeTask {
   if (section !== "research") return section;
   const survey = /问卷|调查|量表|样本|答卷/u.test(message);
-  const market = /MVP|原型|市场测试|漏斗|转化率|留存|验证任务卡|实验/u.test(message);
+  const market = /MVP|原型|市场测试|漏斗|转化率|留存|(?:验证|测试)任务卡|实验/iu.test(message);
   const analysis = /分析|结果|回收|数据|统计|指标|计算|清洗|复盘/u.test(message);
   if (survey) {
     if (/设计|生成.*问卷|编写题目|拟定题目/u.test(message) && !analysis) return "surveyDesign";

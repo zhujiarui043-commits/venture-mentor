@@ -6,7 +6,7 @@ async function boundedFormData(request: Request): Promise<FormData> {
   const maxRequestBytes = Math.max(MAX_WORD_BYTES,MAX_EXCEL_BYTES) + 64 * 1024;
   const contentType = request.headers.get("content-type") || "";
   if (!contentType.startsWith("multipart/form-data;")) throw new MaterialError("请通过附材料按钮上传 Word 或 Excel 文件。", 400);
-  if (Number(request.headers.get("content-length") || 0) > maxRequestBytes) throw new MaterialError("上传内容超过 5 MB，请缩小文件后重试。", 413);
+  if (Number(request.headers.get("content-length") || 0) > maxRequestBytes) throw new MaterialError("上传内容超过 20 MB，请缩小文件后重试。", 413);
   if (!request.body) throw new MaterialError("请选择要上传的 Word 或 Excel 文件。", 400);
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -18,7 +18,7 @@ async function boundedFormData(request: Request): Promise<FormData> {
       size += value.byteLength;
       if (size > maxRequestBytes) {
         await reader.cancel();
-        throw new MaterialError("上传内容超过 5 MB，请缩小文件后重试。", 413);
+        throw new MaterialError("上传内容超过 20 MB，请缩小文件后重试。", 413);
       }
       chunks.push(value);
     }

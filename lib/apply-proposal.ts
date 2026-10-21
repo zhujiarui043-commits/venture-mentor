@@ -36,12 +36,16 @@ export function applyProposal(state: ProjectState, proposal: Proposal, mode: "au
     if(idea) state.rawIdea = idea.content;
   }
   if(p.projectTitle?.trim()) state.title=p.projectTitle.trim().slice(0,32);
+  // Assessments refer to the version reviewed before this turn's text revision.
+  // Apply them first so a substantive revision archives them with that version.
+  if (p.hypothesisAssessments?.length) applyHypothesisAssessments(state,p.hypothesisAssessments,recordedAt);
   const revisedVersions=new Map<string,number>();
-  if(p.hypothesis){
-    const target=state.hypotheses.find(h=>h.id===p.hypothesis?.targetId);
+  const hypothesisChanges: NonNullable<Proposal["hypothesis"]>[] = [p.hypothesis, ...(p.hypotheses || [])].filter((item): item is NonNullable<Proposal["hypothesis"]> => !!item);
+  for (const hypothesis of hypothesisChanges) {
+    const target=state.hypotheses.find(h=>h.id===hypothesis.targetId);
     if(target){
-      const textChanged=target.text.trim()!==p.hypothesis.text.trim();
-      const substantive=isSubstantiveRevision(target,p.hypothesis);
+      const textChanged=target.text.trim()!==hypothesis.text.trim();
+      const substantive=isSubstantiveRevision(target,hypothesis);
       if(substantive){
         revisedVersions.set(target.id,target.version);
         target.history.push({version:target.version,text:target.text,reason:mode === "confirmed" ? "用户确认修订" : "对话同步修订",at:recordedAt,category:target.category,stage:target.stage,evidenceStatus:target.evidenceStatus,priority:target.priority,nextStep:target.nextStep,support:[...target.support],opposition:[...target.opposition],evidenceRecords:[...(target.evidenceRecords || [])],processLabel:target.processLabel,assessment:target.assessment,assessmentHistory:target.assessmentHistory});
@@ -53,10 +57,10 @@ export function applyProposal(state: ProjectState, proposal: Proposal, mode: "au
         target.editHistory ||= [];
         target.editHistory.push({previousText:target.text,at:recordedAt,reason:mode === "confirmed" ? "用户确认措辞调整" : "对话同步措辞调整"});
       }
-      target.text=p.hypothesis.text;target.category=p.hypothesis.category;target.priority=p.hypothesis.priority;target.nextStep=p.hypothesis.nextStep;
+      target.text=hypothesis.text;target.category=hypothesis.category;target.priority=hypothesis.priority;target.nextStep=hypothesis.nextStep;
     }
     else { const num=state.hypotheses.reduce((max,h)=>Math.max(max,Number(h.id.slice(1))||0),0)+1;
-      state.hypotheses.push({id:`H${String(num).padStart(2,"0")}`,version:1,text:p.hypothesis.text,category:p.hypothesis.category,priority:p.hypothesis.priority,nextStep:p.hypothesis.nextStep,stage:"待探索",evidenceStatus:"未进入验证",support:[],opposition:[],evidenceRecords:[],history:[]}); }
+      state.hypotheses.push({id:`H${String(num).padStart(2,"0")}`,version:1,text:hypothesis.text,category:hypothesis.category,priority:hypothesis.priority,nextStep:hypothesis.nextStep,stage:"待探索",evidenceStatus:"未进入验证",support:[],opposition:[],evidenceRecords:[],history:[]}); }
   }
   // Resolve each quote after the revision, against the version shown in the proposal.
   for(const item of p.evidence){
@@ -65,7 +69,6 @@ export function applyProposal(state: ProjectState, proposal: Proposal, mode: "au
     const material=state.materials?.find(m=>m.id===item.source) || (message ? {id:item.source,content:message.content,at:message.at} : undefined);
     if(h&&material)attachEvidenceToVersion(h,item,material,recordedAt,revisedVersions.get(h.id));
   }
-  if (p.hypothesisAssessments?.length) applyHypothesisAssessments(state,p.hypothesisAssessments,recordedAt);
   for (const update of p.hypothesisUpdates || []) {
     const h = state.hypotheses.find(h => h.id === update.hypothesisId)!;
     if (h.priority !== update.priority) {

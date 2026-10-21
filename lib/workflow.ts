@@ -1,4 +1,5 @@
 import { currentCompetition } from "./competition-workspace";
+import { isHypothesisStateRequest } from "./hypothesis";
 import { sectionLabels, type Competitor, type CompetitorCitation, type ProjectState, type Section } from "./types";
 
 export type ConversationPlan = {
@@ -81,7 +82,12 @@ function actionableClauses(message: string) {
 // Route explicit tasks; ambiguous requests keep their current conversational context.
 export function planConversation(section: Section, message: string, referenceText = "", manualSearch = false, state?: Pick<ProjectState, "artifacts" | "messages"> & Partial<Pick<ProjectState, "pending" | "competitionWorkspace">>): ConversationPlan {
   if (manualSearch) return { section: "competitors", kind: "webResearch", label: "联网竞品研究", createArtifact: true };
+  if (section === "hypotheses" && isHypothesisStateRequest(message))
+    return {section:"hypotheses",kind:"artifact",label:"假设与证据任务",createArtifact:true};
   const clauses = actionableClauses(message);
+  // The hypothesis is the input to a research deliverable, not its destination.
+  if (clauses.some(clause => /访谈(?:提纲|方案|计划)|问卷(?:方案|题目)|(?:验证|测试)任务卡|(?:MVP|原型|实验)(?:验证|测试)?(?:方案|计划)/iu.test(clause)))
+    return {section:"research",kind:"artifact",label:"调研验证任务",createArtifact:true};
   const target = targets.find(([, pattern]) => clauses.some(clause => pattern.test(clause)))?.[0];
   if (target) return { section: target, kind: "artifact", label: `${sectionLabels[target]}任务`, createArtifact: true };
   if (section === "diagnosis" && clauses.some(clause => /评分|打分/u.test(clause)))

@@ -7,7 +7,7 @@ import { env } from "cloudflare:workers";
 import { buildCompetitorQuery, CompetitorSearchError, searchCompetitors } from "@/lib/competitor-search";
 import { activeProposal, mergePendingProposal } from "@/lib/proposal-changes";
 import { planConversation } from "@/lib/workflow";
-import { bindMaterialSources, materialContext, MaterialsInputError, prepareMaterials, validateMaterials } from "@/lib/materials";
+import { MAX_ATTACHMENT_CHARS, bindMaterialSources, materialContext, MaterialsInputError, prepareMaterials, validateMaterials } from "@/lib/materials";
 import { applyProposal } from "@/lib/apply-proposal";
 import { ModelRequestError } from "@/lib/agent-search";
 
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
       || (body.searchQuery !== undefined && (typeof body.searchQuery !== "string" || body.searchQuery.length > 400)))
       return Response.json({error:"请求参数不正确"},{status:400});
     if (!body.projectId || !body.message?.trim()) return Response.json({error:"请先输入问题"},{status:400});
-    if((body.referenceText||"").length>12000)return Response.json({error:"材料超过 12000 字，请拆分后分次分析；未修改项目资料"},{status:413});
+    if((body.referenceText||"").length>MAX_ATTACHMENT_CHARS)return Response.json({error:`材料超过 ${MAX_ATTACHMENT_CHARS} 字，请拆分后分次分析；未修改项目资料`},{status:413});
     if (body.references !== undefined && (body.referenceText || body.referenceName))
       return Response.json({error:"不能同时提交两种材料格式"},{status:400});
     const inputs=validateMaterials(body.references !== undefined ? body.references : (body.referenceText?[{name:body.referenceName||"",text:body.referenceText}]:[]));
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     if (!project) return Response.json({error:"项目不存在"},{status:404});
     const savedMaterial=body.materialId ? project.state.materials.find(item=>item.id===body.materialId) : undefined;
     if (body.materialId && !savedMaterial) return Response.json({error:"未找到这份已保存材料"},{status:404});
-    if (savedMaterial && savedMaterial.content.length>12000) return Response.json({error:"这份材料超过 12000 字，请拆分后重新上传分析"},{status:413});
+    if (savedMaterial && savedMaterial.content.length>MAX_ATTACHMENT_CHARS) return Response.json({error:`这份材料超过 ${MAX_ATTACHMENT_CHARS} 字，请拆分后重新上传分析`},{status:413});
     project.state.pending = activeProposal(project.state);
     const message = body.message.slice(0,6000);
     const referenceText=savedMaterial?.content || inputs.map(input=>input.text).join("\n\n");

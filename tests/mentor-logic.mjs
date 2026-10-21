@@ -9,7 +9,7 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const temp = await mkdtemp(join(tmpdir(), "mentor-logic-"));
 try {
   await writeFile(join(temp, "knowledge-rules.mjs"), `export default ${await readFile(join(root, "knowledge/rules.json"), "utf8")};`);
-  for (const name of ["types", "competition-workspace", "structured", "hypothesis", "memory", "proposal-changes", "workflow", "knowledge", "materials"]) {
+  for (const name of ["types", "competition-workspace", "structured", "hypothesis", "memory", "proposal-changes", "workflow", "knowledge", "materials", "project-summary"]) {
     const source = await readFile(join(root, "lib", `${name}.ts`), "utf8");
     const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
       .replace(/from "\.\/([a-z-]+)"/gu, 'from "./$1.mjs"')
@@ -19,11 +19,27 @@ try {
   const { diagnosisNames, canvasNames, emptyProject, numberAnalysisRecords, normalizeProjectNumbers } = await import(pathToFileURL(join(temp, "types.mjs")));
   const { prepareMaterials, materialContext } = await import(pathToFileURL(join(temp, "materials.mjs")));
   const { missingRequiredStructure } = await import(pathToFileURL(join(temp, "structured.mjs")));
-  const { isSubstantiveRevision, evidenceVersionTarget, attachEvidenceToVersion } = await import(pathToFileURL(join(temp, "hypothesis.mjs")));
+  const { isSubstantiveRevision, evidenceVersionTarget, attachEvidenceToVersion, isHypothesisRevisionRequest, missingHypothesisRevision } = await import(pathToFileURL(join(temp, "hypothesis.mjs")));
   const { selectRelevantMemory } = await import(pathToFileURL(join(temp, "memory.mjs")));
   const { proposalChanges, hasProposalChanges, activeProposal, mergePendingProposal } = await import(pathToFileURL(join(temp, "proposal-changes.mjs")));
   const { planConversation, cleanSuggestedQuestions } = await import(pathToFileURL(join(temp, "workflow.mjs")));
   const { selectKnowledge, resolveKnowledgeTask } = await import(pathToFileURL(join(temp, "knowledge.mjs")));
+  const { projectSummary } = await import(pathToFileURL(join(temp, "project-summary.mjs")));
+
+  const revisionProject={...emptyProject("revision"),hypotheses:[{id:"H01",text:"年轻女性需要穿搭帮助"}],messages:[{role:"assistant",content:"建议将 H01 表述改为不限性别，请确认修改。"}]};
+  assert.equal(isHypothesisRevisionRequest(revisionProject,"确认"),true);
+  assert.equal(isHypothesisRevisionRequest(revisionProject,"修改 H01 假设，目标用户不限定性别"),true);
+  for (const text of ["不要修改 H01", "H01 应该怎么修改？", "更新假设清单的优先级", "修改 H01 可以吗？"])
+    assert.equal(isHypothesisRevisionRequest(revisionProject,text),false,text);
+  assert.equal(isHypothesisRevisionRequest({...revisionProject,messages:[{role:"assistant",content:"请确认访谈提纲。"}]},"确认"),false);
+  assert.ok(missingHypothesisRevision(revisionProject,{reply:"H01 的表述也随之更新。",hypothesis:null}));
+  assert.equal(missingHypothesisRevision(revisionProject,{reply:"H01 的表述已更新。",hypothesis:{targetId:"H01",text:"不限性别的年轻人需要穿搭帮助"}},true),null);
+
+  const completeAudience = "早上出门前会结合天气、日程和已有衣物反复比较搭配，且经常因选择耗时而迟到的创业者与上班族";
+  const completeProblem = "衣柜里的衣服不少，却难以根据当天场景快速组成合适搭配，买来的单品也常因不知道如何组合而闲置";
+  const summaryProject = {...emptyProject("summary"), fields:{audience:completeAudience,problem:completeProblem}};
+  assert.equal(projectSummary(summaryProject),`面向${completeAudience}，聚焦${completeProblem}。`);
+  assert.equal(projectSummary(summaryProject).includes("…"),false,"项目总览不应按固定字数截断");
 
   for (const question of ["画布是什么意思？", "请解释八维诊断", "如何生成商业画布？", "不用生成画布，解释一下作用", "现在有哪些访谈分析技术？"]){
     assert.equal(planConversation("canvas", question).createArtifact, false);
@@ -39,6 +55,15 @@ try {
   }
   assert.equal(resolveKnowledgeTask(planConversation("overview","设计问卷题目").section,"设计问卷题目"),"surveyDesign");
   assert.equal(resolveKnowledgeTask(planConversation("overview","分析测试数据漏斗").section,"分析测试数据漏斗"),"mvpAnalysis");
+  for (const section of ["overview", "research", "hypotheses"]) {
+    for (const message of ["围绕最重要的假设设计一张MVP验证任务卡。", "围绕H05假设生成一张人工替代搭配测试任务卡"]) {
+      const plan = planConversation(section,message);
+      assert.equal(plan.section,"research");
+      assert.equal(plan.createArtifact,true);
+      assert.equal(resolveKnowledgeTask(plan.section,message),"mvpDesign");
+    }
+  }
+  assert.equal(planConversation("hypotheses","根据MVP测试结果更新假设清单").section,"hypotheses");
   assert.equal(planConversation("overview","目标用户改成学生可以吗").kind,"discussion");
   assert.equal(planConversation("overview","我想做一个穿搭助手，你有什么建议吗").kind,"discussion");
   assert.equal(planConversation("overview","附上材料供参考","正文").createArtifact,false);

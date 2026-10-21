@@ -70,12 +70,12 @@ audience、task、feature、price、limitation每项最多一句、60字；只�
 只输出JSON，结构示例：{"competition":{"scope":"比较范围","competitors":[{"name":"来源中的产品名","kind":"候选产品","audience":"待核实","task":"待核实","feature":"待核实","price":"待核实","limitation":"待核实","sourceId":"W01","sourceQuote":"逐字原文","citations":[]}],"gap":"待验证的差异","counterExplanation":"既有产品也可能满足需求","unknowns":["检索缺口"]}}。
 没有可比较产品时competitors=[]并说明局限。不输出项目字段、假设、访谈、画布、诊断或重复的报告正文。用户材料只用于了解比较方向，候选产品事实引用本轮网页。`;
   const inputs = JSON.stringify({request:message.slice(0,1000),project:{title:state.title,fields:state.fields},
-    materials:referenceText.slice(0,42000),webSearch:snapshot});
+    materials:referenceText,webSearch:snapshot});
   let competition: CompetitionData | undefined;
   let failure = "DeepSeek 未返回可用的竞品比较 JSON";
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const choice = await completeWithSearch([{role:"system",content:system},{role:"user",content:inputs + (attempt ? `\n上一次格式校验失败：${failure}。请按示例输出完整JSON，最多2个产品，缩短句子。` : "")}],key,3500,{enabled:false,manual:true,snapshot,timeoutMs:25000});
+      const choice = await completeWithSearch([{role:"system",content:system},{role:"user",content:inputs + (attempt ? `\n上一次格式校验失败：${failure}。请按示例输出完整JSON，最多2个产品，缩短句子。` : "")}],key,3500,{enabled:false,manual:true,snapshot,timeoutMs:180000});
       if (choice?.finish_reason === "length") { failure="比较内容被截断"; continue; }
       try { competition=groundCompetition(parseSearchComparison(choice?.message?.content||""),"",snapshot); break; }
       catch (error) { failure=error instanceof SyntaxError?"返回内容不是完整JSON":"缺少 competition.competitors 数组"; }
@@ -287,11 +287,11 @@ export async function proposeCompetitionRevision(state: ProjectState, message: s
     recentConversation:state.messages.slice(-8).map(entry=>({role:entry.role,content:entry.content.slice(0,3000)})),
     confirmationTargets:competitionConfirmations(saved.competition.competitors,state.messages,message),
     savedCompetition:{...saved.competition,competitors:saved.competition.competitors.map((candidate,index)=>({index:index+1,...candidate}))},
-    materials:state.materials.filter(material=>saved.competition.competitors.some(candidate=>candidate.sourceId === material.id || candidate.citations?.some(citation=>citation.sourceId === material.id))).slice(-5).map(material=>({id:material.id,name:material.name,content:material.content.slice(0,4000)})),currentMaterials:referenceText.slice(0,42000)});
+    materials:state.materials.filter(material=>saved.competition.competitors.some(candidate=>candidate.sourceId === material.id || candidate.citations?.some(citation=>citation.sourceId === material.id))).slice(-5).map(material=>({id:material.id,name:material.name,content:material.content.slice(0,4000)})),currentMaterials:referenceText});
   let competition: CompetitionData | undefined, failure = "未返回完整JSON修改对象";
   const metadata = {title:saved.title,limitations:saved.limitations,nextStep:saved.nextStep};
   for (let attempt=0;attempt<2;attempt++) {
-    const choice = await completeWithSearch([{role:"system",content:system},{role:"user",content:input+(attempt?`\n上次修改对象无法应用：${failure}。仅返回本次改动的changes，缩短内容，使用现有对象序号。`:"")}],key,2200,{enabled:false,manual:true,timeoutMs:25000});
+    const choice = await completeWithSearch([{role:"system",content:system},{role:"user",content:input+(attempt?`\n上次修改对象无法应用：${failure}。仅返回本次改动的changes，缩短内容，使用现有对象序号。`:"")}],key,2200,{enabled:false,manual:true,timeoutMs:180000});
     if (choice?.finish_reason === "length") { failure="修改内容被截断"; continue; }
     try {
       const content = choice?.message?.content || "";

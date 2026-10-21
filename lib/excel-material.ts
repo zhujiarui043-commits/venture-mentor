@@ -1,13 +1,15 @@
 import { strFromU8, unzipSync } from "fflate";
 import { MaterialError } from "./word-material";
 
-export const MAX_EXCEL_BYTES = 5 * 1024 * 1024;
+import { MAX_ATTACHMENT_CHARS, MAX_STRUCTURED_FILE_BYTES } from "./materials";
+
+export const MAX_EXCEL_BYTES = MAX_STRUCTURED_FILE_BYTES;
 const MAX_EXCEL_EXPANDED_BYTES = 30 * 1024 * 1024;
 const MAX_EXCEL_XML_BYTES = 12 * 1024 * 1024;
 const MAX_EXCEL_ENTRIES = 2000;
 const MAX_EXCEL_ROWS = 1001;
 const MAX_EXCEL_COLUMNS = 100;
-const MAX_EXCEL_CHARS = 12000;
+const MAX_EXCEL_CHARS = MAX_ATTACHMENT_CHARS;
 
 type SheetResult = { name: string; rows: string[][]; cellCount: number; truncated: boolean };
 
@@ -171,10 +173,10 @@ export async function extractExcelMaterial(file: Pick<File, "name" | "size" | "a
   if (extension === "xls") throw new MaterialError("旧版 .xls 暂无法安全解析，请在 Excel 中另存为 .xlsx 后上传。", 415);
   if (extension !== "xlsx") throw new MaterialError("请上传 .xlsx 格式的 Excel 工作簿。", 415);
   if (!file.size) throw new MaterialError("文件为空，请重新选择 Excel 工作簿。", 400);
-  if (file.size > MAX_EXCEL_BYTES) throw new MaterialError("Excel 文件超过 5 MB，请只保留需要分析的问卷结果后重试。", 413);
+  if (file.size > MAX_EXCEL_BYTES) throw new MaterialError("Excel 文件超过 20 MB，请只保留需要分析的问卷结果后重试。", 413);
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    if (bytes.byteLength > MAX_EXCEL_BYTES) throw new MaterialError("Excel 文件超过 5 MB。", 413);
+    if (bytes.byteLength > MAX_EXCEL_BYTES) throw new MaterialError("Excel 文件超过 20 MB。", 413);
     inspectArchive(bytes);
     const files = unzipSync(bytes, {filter:entry=>/^(?:\[Content_Types\]\.xml|_rels\/\.rels|xl\/.*\.(?:xml|rels))$/iu.test(entry.name)});
     const {workbook,sheets} = workbookParts(files);
@@ -188,7 +190,7 @@ export async function extractExcelMaterial(file: Pick<File, "name" | "size" | "a
     parsed.sort((a,b)=>b.cellCount-a.cellCount);
     const selected = parsed[0], text = sheetCsv(selected).trim();
     if (text.length > MAX_EXCEL_CHARS)
-      throw new MaterialError(`工作表“${selected.name}”转换后有 ${text.length} 字，超过 12000 字；请删除无关列或拆分数据后分次上传。`, 413);
+      throw new MaterialError(`工作表“${selected.name}”转换后有 ${text.length} 字，超过 ${MAX_EXCEL_CHARS} 字；请删除无关列或拆分数据后分次上传。`, 413);
     const warnings = [`已读取工作表“${selected.name}”，并转换为表格文本；公式优先使用文件中保存的计算结果，请在发送前核对预览。`];
     if (parsed.length > 1) warnings.push(`工作簿共有 ${parsed.length} 个非空工作表，本次选取数据量最大的“${selected.name}”；如需分析其他工作表，请单独保存后上传。`);
     if (selected.truncated) warnings.push(`仅读取前 ${MAX_EXCEL_ROWS} 行、${MAX_EXCEL_COLUMNS} 列，请缩小数据范围后重新上传以获得完整分析。`);

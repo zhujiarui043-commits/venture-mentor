@@ -3,8 +3,10 @@ import mammoth from "mammoth";
 import WordExtractor from "word-extractor";
 import { unzipSync } from "fflate";
 
-export const MAX_WORD_BYTES = 5 * 1024 * 1024;
-export const MAX_MATERIAL_CHARS = 12000;
+import { MAX_ATTACHMENT_CHARS, MAX_STRUCTURED_FILE_BYTES } from "./materials";
+
+export const MAX_WORD_BYTES = MAX_STRUCTURED_FILE_BYTES;
+export const MAX_MATERIAL_CHARS = MAX_ATTACHMENT_CHARS;
 export class MaterialError extends Error {
   constructor(message: string, public status = 422) { super(message); }
 }
@@ -30,10 +32,10 @@ export async function extractWordMaterial(file: Pick<File, "name" | "size" | "ar
   const extension = file.name.toLowerCase().match(/\.(docx|doc)$/u)?.[1];
   if (!extension) throw new MaterialError("请上传 .docx 或 .doc 格式的 Word 文档。", 415);
   if (!file.size) throw new MaterialError("文件为空，请重新选择 Word 文档。", 400);
-  if (file.size > MAX_WORD_BYTES) throw new MaterialError("Word 文件超过 5 MB，请拆分或移除较大的图片后重试。", 413);
+  if (file.size > MAX_WORD_BYTES) throw new MaterialError("Word 文件超过 20 MB，请拆分或移除较大的图片后重试。", 413);
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    if (bytes.byteLength > MAX_WORD_BYTES) throw new MaterialError("Word 文件超过 5 MB。", 413);
+    if (bytes.byteLength > MAX_WORD_BYTES) throw new MaterialError("Word 文件超过 20 MB。", 413);
     let text: string;
     const warnings = ["已提取 Word 正文；图片、扫描内容、页眉页脚、批注和版式未作为分析材料。请在发送前核对提取内容。"];
     if (extension === "docx") {
@@ -49,7 +51,7 @@ export async function extractWordMaterial(file: Pick<File, "name" | "size" | "ar
     }
     text = text.replace(/^\uFEFF/u, "").replace(/\r\n?/gu, "\n").replace(/\u0000/gu, "").trim();
     if (!text) throw new MaterialError("没有提取到可读正文。若是扫描图片，请先在 Word 中转成可选中的文字再上传。");
-    if (text.length > MAX_MATERIAL_CHARS) throw new MaterialError(`提取的正文有 ${text.length} 字，超过 12000 字；请拆分文档后分次上传，本次未附加材料。`, 413);
+    if (text.length > MAX_MATERIAL_CHARS) throw new MaterialError(`提取的正文有 ${text.length} 字，超过 ${MAX_MATERIAL_CHARS} 字；请拆分文档后分次上传，本次未附加材料。`, 413);
     return { text, name:file.name.split(/[\\/]/u).at(-1)!.replace(/[\u0000-\u001f]/gu, "").slice(0,200), warnings };
   } catch (error) {
     if (error instanceof MaterialError) throw error;

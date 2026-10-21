@@ -1,8 +1,9 @@
 import type { ProjectState, Proposal } from "./types";
 
 export const MAX_ATTACHMENTS = 5;
-export const MAX_ATTACHMENT_CHARS = 12000;
-export const MAX_TOTAL_ATTACHMENT_CHARS = 40000;
+export const MAX_ATTACHMENT_CHARS = 100000;
+export const MAX_TOTAL_ATTACHMENT_CHARS = 200000;
+export const MAX_STRUCTURED_FILE_BYTES = 20 * 1024 * 1024;
 export type MaterialInput = { name: string; text: string };
 export type Attachment = MaterialInput & { id: string; warnings: string[] };
 export class MaterialsInputError extends Error {
@@ -18,10 +19,10 @@ export function validateMaterials(value: unknown): MaterialInput[] {
       throw new MaterialsInputError("材料格式不正确，请重新选择文件。");
     if (!item.text.trim()) throw new MaterialsInputError("材料正文为空，请移除空文件。");
     if (item.text.length > MAX_ATTACHMENT_CHARS)
-      throw new MaterialsInputError(`${item.name || "材料"} 超过 12000 字，请拆分文档。`, 413);
+      throw new MaterialsInputError(`${item.name || "材料"} 超过 ${MAX_ATTACHMENT_CHARS} 字，请拆分文档。`, 413);
     total += item.text.length;
     if (total > MAX_TOTAL_ATTACHMENT_CHARS)
-      throw new MaterialsInputError("本次材料正文合计超过 40000 字，请分批分析；未修改项目资料。", 413);
+      throw new MaterialsInputError(`本次材料正文合计超过 ${MAX_TOTAL_ATTACHMENT_CHARS} 字，请分批分析；未修改项目资料。`, 413);
     return {name:item.name.split(/[\\/]/u).at(-1)!.replace(/[\u0000-\u001f]/gu, "").slice(0,200),text:item.text};
   });
 }

@@ -82,7 +82,8 @@ export type FunnelSummary = {
   warnings: string[];
 };
 export const canvasNames = ["客户细分","价值主张","渠道通路","客户关系","收入来源","核心资源","关键活动","重要合作","成本结构"] as const;
-export type CanvasModule = { name: typeof canvasNames[number]; content: string; sourceRefs: string[]; hypothesisRefs: string[]; status: "已记录" | "初步设想" | "待验证" | "未知"; limitations: string; nextStep: string };
+export const canvasStatuses = ["已记录", "初步设想", "待验证", "未知"] as const;
+export type CanvasModule = { name: typeof canvasNames[number]; content: string; sourceRefs: string[]; hypothesisRefs: string[]; status: typeof canvasStatuses[number]; limitations: string; nextStep: string };
 export type CanvasData = { modules: CanvasModule[]; conflicts: string[]; changes?: { name: string; previous: string; current: string }[] };
 export type CompetitorCitation = { field: "audience" | "task" | "feature" | "price" | "limitation"; sourceId: string; quote: string; url?: string; sourceDate?: string; retrievedAt?: string };
 export type Competitor = { name: string; kind: string; audience: string; task: string; feature: string; price: string; limitation: string; sourceQuote: string; sourceId: string; sourceDate: string; verification: "用户材料待核" | "网页资料待核" | "待核实" | "用户已核实" | "部分字段已核实"; sourceUrl?: string; sourceRetrievedAt?: string; citations?: CompetitorCitation[]; unverifiedFields?: CompetitorCitation["field"][]; userVerifications?: Partial<Record<CompetitorCitation["field"], {quote: string; confirmedAt: string; contextQuote?: string}>> };
@@ -111,6 +112,7 @@ export type Proposal = {
   projectTitle?: string;
   artifact: Omit<Artifact, "id" | "version" | "createdAt"> | null;
   hypothesis: { text: string; category: string; priority: string; nextStep: string; targetId?: string; changeKind?: "措辞调整" | "实质修订" } | null;
+  hypotheses?: { text: string; category: string; priority: string; nextStep: string }[];
   evidence: { hypothesisId: string; hypothesisVersion?: number; versionTarget?: "current" | "revised"; direction: "support" | "opposition" | "boundary"; quote: string; source: string }[];
   hypothesisAssessments?: HypothesisAssessment[];
   hypothesisUpdates?: HypothesisUpdate[];
@@ -187,7 +189,7 @@ export function researchTextModes(text: string): ResearchMode[] {
     ? /访谈|受访者/u.test(text)
     : mode === "问卷调查"
       ? /问卷|调查题目|调查结果/u.test(text)
-      : /\bmvp\b|漏斗|原型测试|测试数据|验证任务卡|实验(?:方案|计划|结果|数据)/iu.test(text));
+      : /\bmvp\b|漏斗|原型测试|测试数据|(?:验证|测试)任务卡|实验(?:方案|计划|结果|数据)/iu.test(text));
 }
 
 export function artifactResearchModes(artifact: Artifact): ResearchMode[] {
@@ -215,6 +217,9 @@ export const analysisRecordPrefixes: Record<Section, string> = {
 export function numberAnalysisRecords(artifacts: Artifact[]): Artifact[] {
   const counts = new Map<string, number>();
   return artifacts.map(artifact => {
+    // Older task cards were routed to hypotheses when the prompt mentioned a hypothesis.
+    if (artifact.section === "hypotheses" && (artifact.mvp || /(?:验证|测试)任务卡/u.test(cleanRecordName(artifact.title))))
+      artifact = {...artifact, section:"research", researchMode:"MVP 测试"};
     const mode = artifact.section === "research" ? artifactResearchModes(artifact)[0] : undefined;
     // Unclassified research keeps its own sequence until its method is known.
     const prefix = artifact.section === "research" ? (mode ? researchRecordPrefixes[mode] : "U") : analysisRecordPrefixes[artifact.section];

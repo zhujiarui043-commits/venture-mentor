@@ -19,7 +19,7 @@ export function searchAllowed(message: string, enabled = true): boolean {
   return enabled && !/(?:不要|不用|不许|禁止|别|无需|不需要)\s*(?:再|进行|去)?\s*(?:联网|上网|网络搜索|网上搜|搜索网页)|(?:仅|只)\s*(?:根据|使用|分析)\s*(?:我(?:提供|上传|附上)的)?(?:这些|当前|已上传)?\s*材料/u.test(message);
 }
 
-async function completion(messages: ChatMessage[], key: string, maxTokens: number, allowTools: boolean, timeoutMs = 60000): Promise<CompletionChoice | undefined> {
+async function completion(messages: ChatMessage[], key: string, maxTokens: number, allowTools: boolean, timeoutMs = 180000): Promise<CompletionChoice | undefined> {
   // All completion paths share the same user-facing language rule, including retries.
   messages = messages.map(message => message.role === "system" ? {...message, content: `${message.content || ""}\n对外表达：直接解释判断、依据、限制和下一步。reply、suggestedQuestions、成果标题及你撰写的分析正文均不得提及内部知识库的名称、编号（如 KBxx）或“根据某某知识库”等表述；内部规则只用于分析，不作为面向用户的引用来源。真实用户材料、逐字证据与网页来源保留原文和来源标识。`} : message);
   const signal = AbortSignal.timeout(timeoutMs);
